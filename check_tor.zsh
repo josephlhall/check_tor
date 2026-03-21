@@ -1,6 +1,6 @@
 #!/usr/bin/env zsh
 
-# Set this to the IP and port of your Tor SOCKS proxy
+# Set this to the IP and port of your Tor SOCKS proxy.
 TOR_PROXY="localhost:9050"
 
 # 1. Check if a file argument was provided
@@ -38,8 +38,13 @@ while IFS= read -r url || [[ -n "$url" ]]; do
         url="https://$url"
     fi
 
-    # Fetch just the HTTP status code, routing DNS through the SOCKS5 proxy
-    http_code=$(curl -s -o /dev/null -w "%{http_code}" --socks5-hostname "$TOR_PROXY" --max-time 30 "$url")
+    # Fetch HTTP status code, routing DNS through SOCKS5, spoofing a browser, and following redirects (-L)
+    http_code=$(curl -s -o /dev/null -w "%{http_code}" -L \
+        -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36" \
+        -H "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8" \
+        -H "Accept-Language: en-US,en;q=0.5" \
+        --socks5-hostname "$TOR_PROXY" --max-time 30 "$url")
+    
     curl_exit_code=$?
     
     if [[ $curl_exit_code -eq 97 ]]; then
@@ -48,7 +53,7 @@ while IFS= read -r url || [[ -n "$url" ]]; do
         echo "[\033[35mCERT ERROR\033[0m] $url (Invalid or expired SSL Certificate)"
     elif [[ $curl_exit_code -eq 28 || $curl_exit_code -eq 7 ]]; then
         echo "[\033[33mTIMEOUT\033[0m] $url (Connection dropped/timed out)"
-    elif [[ "$http_code" == "200" || "$http_code" == "301" || "$http_code" == "302" || "$http_code" == "308" ]]; then
+    elif [[ "$http_code" == "200" || "$http_code" == "301" || "$http_code" == "302" || "$http_code" == "307" || "$http_code" == "308" ]]; then
         echo "[\033[32mPASS\033[0m] $url (Status: $http_code)"
     elif [[ "$http_code" == "403" || "$http_code" == "1020" || "$http_code" == "401" ]]; then
         echo "[\033[31mFAIL\033[0m] $url (Status: $http_code - Likely blocking Tor)"
