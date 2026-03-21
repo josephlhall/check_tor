@@ -29,7 +29,7 @@ This script requires `zsh`, `curl`, and a local `tor` proxy to run.
    ```zsh
    alias tor-on='sudo service tor start'
    alias tor-off='sudo service tor stop'
-   alias tor-reload='sudo kill -HUP $(pidof tor)'
+   alias tor-reset='sudo kill -HUP $(pidof tor)'
    ```
 
 *Run `source ~/.zshrc` to apply any alias changes.*
