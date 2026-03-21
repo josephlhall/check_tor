@@ -1,6 +1,6 @@
 # Tor Reachability Scanner
 
-A `zsh` utility script for Project Galileo that automates testing a list of domains against a local Tor SOCKS proxy. It verifies whether sites are accessible over the Tor network, checking for WAF blocks, SSL/TLS certificate misconfigurations, and SOCKS connection failures.
+A `zsh` utility script for Project Galileo that automates testing a list of domains against a local Tor SOCKS proxy. It verifies whether sites are accessible over the Tor network, checking for WAF blocks, SSL/TLS certificate misconfigurations, and SOCKS connection failures. By Joseph Lorenzo Hall, Phd (<https://josephhall.org/>)
 
 ## Prerequisites & Installation
 
