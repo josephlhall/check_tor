@@ -16,6 +16,7 @@ This script requires `zsh`, `curl`, and a local `tor` proxy to run.
    ```zsh
    alias tor-on='brew services start tor'
    alias tor-off='brew services stop tor'
+   alias tor-stat='brew services info tor'
    alias tor-reset='brew services restart tor'
    ```
 
@@ -29,6 +30,7 @@ This script requires `zsh`, `curl`, and a local `tor` proxy to run.
    ```zsh
    alias tor-on='sudo service tor start'
    alias tor-off='sudo service tor stop'
+   alias tor-stat='sudo service tor status'
    alias tor-reset='sudo service tor restart'
    ```
 

@@ -241,7 +241,8 @@ proxy management:</p>
 <div class="sourceCode" id="cb2"><pre
 class="sourceCode zsh"><code class="sourceCode zsh"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="bu">alias</span> tor-on=<span class="st">&#39;brew services start tor&#39;</span></span>
 <span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a><span class="bu">alias</span> tor-off=<span class="st">&#39;brew services stop tor&#39;</span></span>
-<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a><span class="bu">alias</span> tor-reset=<span class="st">&#39;brew services restart tor&#39;</span></span></code></pre></div></li>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a><span class="bu">alias</span> tor-stat=<span class="st">&#39;brew services info tor&#39;</span></span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a><span class="bu">alias</span> tor-reset=<span class="st">&#39;brew services restart tor&#39;</span></span></code></pre></div></li>
 </ol>
 <h3 id="for-linux-chromeos-debianubuntu">For Linux / ChromeOS
 (Debian/Ubuntu)</h3>
@@ -255,7 +256,8 @@ recommended):</strong> Add these to your shell profile (e.g.,
 <div class="sourceCode" id="cb4"><pre
 class="sourceCode zsh"><code class="sourceCode zsh"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="bu">alias</span> tor-on=<span class="st">&#39;sudo service tor start&#39;</span></span>
 <span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a><span class="bu">alias</span> tor-off=<span class="st">&#39;sudo service tor stop&#39;</span></span>
-<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a><span class="bu">alias</span> tor-reset=<span class="st">&#39;sudo service tor restart&#39;</span></span></code></pre></div></li>
+<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a><span class="bu">alias</span> tor-stat=<span class="st">&#39;sudo service tor status&#39;</span></span>
+<span id="cb4-4"><a href="#cb4-4" aria-hidden="true" tabindex="-1"></a><span class="bu">alias</span> tor-reset=<span class="st">&#39;sudo service tor restart&#39;</span></span></code></pre></div></li>
 </ol>
 <p><em>Run <code>source ~/.zshrc</code> to apply any alias
 changes.</em></p>
