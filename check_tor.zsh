@@ -1,6 +1,6 @@
 #!/usr/bin/env zsh
 
-# Set this to the IP and port of your Tor SOCKS proxy.
+# Set this to the IP and port of your Tor SOCKS proxy
 TOR_PROXY="localhost:9050"
 
 # 1. Check if a file argument was provided
