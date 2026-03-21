@@ -92,12 +92,4 @@ The script evaluates the `curl` exit codes and HTTP status codes to provide spec
 
 ## License
 
-(cc) 2026 Joseph Lorenzo Hall
-
-This script is marked with CC0 1.0 Universal. 
-
-The person who associated a work with this deed has dedicated the work to the public domain by waiving all of their rights to the work worldwide under copyright law, including all related and neighboring rights, to the extent allowed by law.
-
-You can copy, modify, distribute and perform the work, even for commercial purposes, all without asking permission.
-
-For more information, please refer to <https://creativecommons.org/publicdomain/zero/1.0/>
+This project is dedicated to the public domain under CC0 1.0 Universal. See the `LICENSE` file for details.
