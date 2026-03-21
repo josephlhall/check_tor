@@ -69,6 +69,17 @@ This script requires `zsh`, `curl`, and a local `tor` proxy to run.
    tor-off
    ```
 
+## Output Legend
+
+The script evaluates the `curl` exit codes and HTTP status codes to provide specific diagnostics:
+
+* **[PASS]** (Green): Status 200, 301, 302, or 308. The site is successfully routing Tor traffic over the Internet.
+* **[FAIL]** (Red): Status 403, 1020, or 401. The server is actively dropping or blocking the request, likely due to a WAF rule targeting Tor exit nodes.
+* **[CERT ERROR]** (Purple): The destination server has an invalid, self-signed, or expired SSL/TLS certificate, terminating the secure connection before an HTTP status can be negotiated.
+* **[SOCKS ERROR]** (Red): The Tor circuit was built, but the final exit node could not complete the connection to the host server.
+* **[TIMEOUT]** (Yellow): The connection hung and was dropped after 30 seconds. Often caused by silent firewall drops or WAF CAPTCHA loops that block automated requests.
+
+
 ## Generating HTML Documentation
 
 If you prefer to read this documentation in a web browser, you can convert this Markdown file to a standalone HTML page using Pandoc.
@@ -81,16 +92,6 @@ If you prefer to read this documentation in a web browser, you can convert this 
    ```zsh
    pandoc README.md -f markdown -t html -s -o README.html
    ```
-
-## Output Legend
-
-The script evaluates the `curl` exit codes and HTTP status codes to provide specific diagnostics:
-
-* **[PASS]** (Green): Status 200, 301, 302, or 308. The site is successfully routing Tor traffic over the Internet.
-* **[FAIL]** (Red): Status 403, 1020, or 401. The server is actively dropping or blocking the request, likely due to a WAF rule targeting Tor exit nodes.
-* **[CERT ERROR]** (Purple): The destination server has an invalid, self-signed, or expired SSL/TLS certificate, terminating the secure connection before an HTTP status can be negotiated.
-* **[SOCKS ERROR]** (Red): The Tor circuit was built, but the final exit node could not complete the connection to the host server.
-* **[TIMEOUT]** (Yellow): The connection hung and was dropped after 30 seconds. Often caused by silent firewall drops or WAF CAPTCHA loops that block automated requests.
 
 ## License
 

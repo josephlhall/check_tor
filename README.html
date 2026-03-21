@@ -288,21 +288,6 @@ class="sourceCode zsh"><code class="sourceCode zsh"><span id="cb8-1"><a href="#c
 <div class="sourceCode" id="cb9"><pre
 class="sourceCode zsh"><code class="sourceCode zsh"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a><span class="ex">tor-off</span></span></code></pre></div></li>
 </ol>
-<h2 id="generating-html-documentation">Generating HTML
-Documentation</h2>
-<p>If you prefer to read this documentation in a web browser, you can
-convert this Markdown file to a standalone HTML page using Pandoc.</p>
-<ol type="1">
-<li><p><strong>Install Pandoc:</strong></p>
-<ul>
-<li>macOS: <code>brew install pandoc</code></li>
-<li>Linux: <code>sudo apt install pandoc</code></li>
-</ul></li>
-<li><p><strong>Convert the README:</strong> Run the following command in
-the same directory as this file:</p>
-<div class="sourceCode" id="cb10"><pre
-class="sourceCode zsh"><code class="sourceCode zsh"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a><span class="ex">pandoc</span> README.md <span class="at">-f</span> markdown <span class="at">-t</span> html <span class="at">-s</span> <span class="at">-o</span> README.html</span></code></pre></div></li>
-</ol>
 <h2 id="output-legend">Output Legend</h2>
 <p>The script evaluates the <code>curl</code> exit codes and HTTP status
 codes to provide specific diagnostics:</p>
@@ -322,6 +307,21 @@ server.</li>
 dropped after 30 seconds. Often caused by silent firewall drops or WAF
 CAPTCHA loops that block automated requests.</li>
 </ul>
+<h2 id="generating-html-documentation">Generating HTML
+Documentation</h2>
+<p>If you prefer to read this documentation in a web browser, you can
+convert this Markdown file to a standalone HTML page using Pandoc.</p>
+<ol type="1">
+<li><p><strong>Install Pandoc:</strong></p>
+<ul>
+<li>macOS: <code>brew install pandoc</code></li>
+<li>Linux: <code>sudo apt install pandoc</code></li>
+</ul></li>
+<li><p><strong>Convert the README:</strong> Run the following command in
+the same directory as this file:</p>
+<div class="sourceCode" id="cb10"><pre
+class="sourceCode zsh"><code class="sourceCode zsh"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a><span class="ex">pandoc</span> README.md <span class="at">-f</span> markdown <span class="at">-t</span> html <span class="at">-s</span> <span class="at">-o</span> README.html</span></code></pre></div></li>
+</ol>
 <h2 id="license">License</h2>
 <p>This project is dedicated to the public domain under CC0 1.0
 Universal. See the <code>LICENSE</code> file for details.</p>
