@@ -1,15 +1,15 @@
 <!DOCTYPE html>
-<html xmlns="http://www.w3.org/1999/xhtml">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="" xml:lang="">
 <head>
   <meta charset="utf-8" />
   <meta name="generator" content="pandoc" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
   <title>README</title>
   <style>
-    /* Default styles provided by pandoc.
-    ** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
-    */
     html {
+      line-height: 1.5;
+      font-family: Georgia, serif;
+      font-size: 20px;
       color: #1a1a1a;
       background-color: #fdfdfd;
     }
@@ -28,16 +28,13 @@
     @media (max-width: 600px) {
       body {
         font-size: 0.9em;
-        padding: 12px;
+        padding: 1em;
       }
       h1 {
         font-size: 1.8em;
       }
     }
     @media print {
-      html {
-        background-color: white;
-      }
       body {
         background-color: transparent;
         color: black;
@@ -61,10 +58,6 @@
       color: #1a1a1a;
     }
     img {
-      max-width: 100%;
-    }
-    svg {
-      height: auto;
       max-width: 100%;
     }
     h1, h2, h3, h4, h5, h6 {
@@ -91,11 +84,9 @@
       color: #606060;
     }
     code {
-      white-space: pre-wrap;
-      font-family: Menlo, Monaco, Consolas, 'Lucida Console', monospace;
+      font-family: Menlo, Monaco, 'Lucida Console', Consolas, monospace;
       font-size: 85%;
       margin: 0;
-      hyphens: manual;
     }
     pre {
       margin: 1em 0;
@@ -111,8 +102,8 @@
      overflow: visible;
     }
     hr {
+      background-color: #1a1a1a;
       border: none;
-      border-top: 1px solid #1a1a1a;
       height: 1px;
       margin: 1em 0;
     }
@@ -155,22 +146,12 @@
     #TOC a:not(:hover) {
       text-decoration: none;
     }
+    code{white-space: pre-wrap;}
     span.smallcaps{font-variant: small-caps;}
-    div.columns{display: flex; gap: min(4vw, 1.5em);}
-    div.column{flex: auto; overflow-x: auto;}
+    span.underline{text-decoration: underline;}
+    div.column{display: inline-block; vertical-align: top; width: 50%;}
     div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
-    /* The extra [class] is a hack that increases specificity enough to
-       override a similar rule in reveal.js */
-    ul.task-list[class]{list-style: none;}
-    ul.task-list li input[type="checkbox"] {
-      font-size: inherit;
-      width: 0.8em;
-      margin: 0 0.8em 0.2em -1.6em;
-      vertical-align: middle;
-    }
-    .display.math{display: block; text-align: center; margin: 0.5rem auto;}
-    /* CSS for syntax highlighting */
-    html { -webkit-text-size-adjust: 100%; }
+    ul.task-list{list-style: none;}
     pre > code.sourceCode { white-space: pre; position: relative; }
     pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
     pre > code.sourceCode > span:empty { height: 1.2em; }
@@ -234,6 +215,7 @@
     code span.va { color: #19177c; } /* Variable */
     code span.vs { color: #4070a0; } /* VerbatimString */
     code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warning */
+    .display.math{display: block; text-align: center; margin: 0.5rem auto;}
   </style>
 </head>
 <body>
@@ -243,11 +225,13 @@ testing a list of domains against a local Tor SOCKS proxy. It verifies
 whether sites are accessible over the Tor network, checking for WAF
 blocks, SSL/TLS certificate misconfigurations, and SOCKS connection
 failures.</p>
-<h2 id="prerequisites">Prerequisites</h2>
-<p>This script requires macOS and Homebrew to install and run the Tor
-proxy locally.</p>
+<h2 id="prerequisites-installation">Prerequisites &amp;
+Installation</h2>
+<p>This script requires <code>zsh</code>, <code>curl</code>, and a local
+<code>tor</code> proxy to run.</p>
+<h3 id="for-macos">For macOS</h3>
 <ol type="1">
-<li><p><strong>Install Tor:</strong></p>
+<li><p><strong>Install dependencies via Homebrew:</strong></p>
 <div class="sourceCode" id="cb1"><pre
 class="sourceCode zsh"><code class="sourceCode zsh"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="ex">brew</span> install tor</span></code></pre></div></li>
 <li><p><strong>Set up terminal aliases (Optional but
@@ -256,36 +240,65 @@ proxy management:</p>
 <div class="sourceCode" id="cb2"><pre
 class="sourceCode zsh"><code class="sourceCode zsh"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="bu">alias</span> tor-on=<span class="st">&#39;brew services start tor&#39;</span></span>
 <span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a><span class="bu">alias</span> tor-off=<span class="st">&#39;brew services stop tor&#39;</span></span>
-<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a><span class="bu">alias</span> tor-reset=<span class="st">&#39;brew services restart tor&#39;</span></span></code></pre></div>
-<p><em>Run <code>source ~/.zshrc</code> to apply the
-changes.</em></p></li>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a><span class="bu">alias</span> tor-reset=<span class="st">&#39;brew services restart tor&#39;</span></span></code></pre></div></li>
 </ol>
+<h3 id="for-linux-chromeos-debianubuntu">For Linux / ChromeOS
+(Debian/Ubuntu)</h3>
+<ol type="1">
+<li><p><strong>Install dependencies via APT:</strong></p>
+<div class="sourceCode" id="cb3"><pre
+class="sourceCode zsh"><code class="sourceCode zsh"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="fu">sudo</span> apt update <span class="kw">&amp;&amp;</span> <span class="fu">sudo</span> apt install zsh tor curl <span class="at">-y</span></span></code></pre></div></li>
+<li><p><strong>Set up terminal aliases (Optional but
+recommended):</strong> Add these to your shell profile (e.g.,
+<code>~/.zshrc</code>) to map to the system service:</p>
+<div class="sourceCode" id="cb4"><pre
+class="sourceCode zsh"><code class="sourceCode zsh"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="bu">alias</span> tor-on=<span class="st">&#39;sudo service tor start&#39;</span></span>
+<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a><span class="bu">alias</span> tor-off=<span class="st">&#39;sudo service tor stop&#39;</span></span>
+<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a><span class="bu">alias</span> tor-reload=<span class="st">&#39;sudo kill -HUP $(pidof tor)&#39;</span></span></code></pre></div></li>
+</ol>
+<p><em>Run <code>source ~/.zshrc</code> to apply any alias
+changes.</em></p>
 <h2 id="setup">Setup</h2>
 <ol type="1">
 <li><p>Place <code>check_tor.zsh</code> and your target list (e.g.,
 <code>targets.txt</code>) in the same directory.</p></li>
 <li><p>Make the script executable:</p>
-<div class="sourceCode" id="cb3"><pre
-class="sourceCode zsh"><code class="sourceCode zsh"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="fu">chmod</span> +x check_tor.zsh</span></code></pre></div></li>
+<div class="sourceCode" id="cb5"><pre
+class="sourceCode zsh"><code class="sourceCode zsh"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="fu">chmod</span> +x check_tor.zsh</span></code></pre></div></li>
 </ol>
 <h2 id="usage">Usage</h2>
 <ol type="1">
 <li><p><strong>Start the Tor proxy:</strong> Ensure your local proxy is
 running on <code>localhost:9050</code> before scanning the Internet.</p>
-<div class="sourceCode" id="cb4"><pre
-class="sourceCode zsh"><code class="sourceCode zsh"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="ex">tor-on</span></span></code></pre></div></li>
+<div class="sourceCode" id="cb6"><pre
+class="sourceCode zsh"><code class="sourceCode zsh"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="ex">tor-on</span></span></code></pre></div></li>
 <li><p><strong>Populate your target list:</strong> Add the domains you
 want to test to a text file, one per line. The script will automatically
 format them to enforce <code>https://</code>.</p>
-<div class="sourceCode" id="cb5"><pre
-class="sourceCode zsh"><code class="sourceCode zsh"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="ex">emacs</span> targets.txt</span></code></pre></div></li>
+<div class="sourceCode" id="cb7"><pre
+class="sourceCode zsh"><code class="sourceCode zsh"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a><span class="ex">emacs</span> targets.txt</span></code></pre></div></li>
 <li><p><strong>Run the scanner:</strong> Pass your text file as an
 argument to the script.</p>
-<div class="sourceCode" id="cb6"><pre
-class="sourceCode zsh"><code class="sourceCode zsh"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./check_tor.zsh</span> targets.txt</span></code></pre></div></li>
+<div class="sourceCode" id="cb8"><pre
+class="sourceCode zsh"><code class="sourceCode zsh"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./check_tor.zsh</span> targets.txt</span></code></pre></div></li>
 <li><p><strong>Stop the Tor proxy (when finished):</strong></p>
-<div class="sourceCode" id="cb7"><pre
-class="sourceCode zsh"><code class="sourceCode zsh"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a><span class="ex">tor-off</span></span></code></pre></div></li>
+<div class="sourceCode" id="cb9"><pre
+class="sourceCode zsh"><code class="sourceCode zsh"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a><span class="ex">tor-off</span></span></code></pre></div></li>
+</ol>
+<h2 id="generating-html-documentation">Generating HTML
+Documentation</h2>
+<p>If you prefer to read this documentation in a web browser, you can
+convert this Markdown file to a standalone HTML page using Pandoc.</p>
+<ol type="1">
+<li><p><strong>Install Pandoc:</strong></p>
+<ul>
+<li>macOS: <code>brew install pandoc</code></li>
+<li>Linux: <code>sudo apt install pandoc</code></li>
+</ul></li>
+<li><p><strong>Convert the README:</strong> Run the following command in
+the same directory as this file:</p>
+<div class="sourceCode" id="cb10"><pre
+class="sourceCode zsh"><code class="sourceCode zsh"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a><span class="ex">pandoc</span> README.md <span class="at">-f</span> markdown <span class="at">-t</span> html <span class="at">-s</span> <span class="at">-o</span> README.html</span></code></pre></div></li>
 </ol>
 <h2 id="output-legend">Output Legend</h2>
 <p>The script evaluates the <code>curl</code> exit codes and HTTP status
@@ -306,23 +319,10 @@ server.</li>
 dropped after 30 seconds. Often caused by silent firewall drops or WAF
 CAPTCHA loops that block automated requests.</li>
 </ul>
-<h2 id="generating-html-documentation">Generating HTML
-Documentation</h2>
-<p>If you prefer to read this documentation in a web browser, you can
-easily convert this Markdown file to a standalone HTML page using
-Pandoc.</p>
-<ol type="1">
-<li><p><strong>Install Pandoc (if not already installed):</strong></p>
-<div class="sourceCode" id="cb8"><pre
-class="sourceCode zsh"><code class="sourceCode zsh"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="ex">brew</span> install pandoc</span></code></pre></div></li>
-<li><p><strong>Convert the README:</strong> Run the following command in
-the same directory as this file:</p>
-<div class="sourceCode" id="cb9"><pre
-class="sourceCode zsh"><code class="sourceCode zsh"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a><span class="ex">pandoc</span> README.md <span class="at">-f</span> markdown <span class="at">-t</span> html <span class="at">-s</span> <span class="at">-o</span> README.html</span></code></pre></div>
-<p><em>You can then open <code>README.html</code> directly in your
-browser.</em></p></li>
-</ol>
 <h2 id="license">License</h2>
+<ol start="200" type="i">
+<li>2026 Joseph Lorenzo Hall</li>
+</ol>
 <p>This script is marked with CC0 1.0 Universal.</p>
 <p>The person who associated a work with this deed has dedicated the
 work to the public domain by waiving all of their rights to the work

@@ -2,15 +2,15 @@
 
 A `zsh` utility script for Project Galileo that automates testing a list of domains against a local Tor SOCKS proxy. It verifies whether sites are accessible over the Tor network, checking for WAF blocks, SSL/TLS certificate misconfigurations, and SOCKS connection failures.
 
-## Prerequisites
+## Prerequisites & Installation
 
-This script requires macOS and Homebrew to install and run the Tor proxy locally.
+This script requires `zsh`, `curl`, and a local `tor` proxy to run.
 
-1. **Install Tor:**
+### For macOS
+1. **Install dependencies via Homebrew:**
    ```zsh
    brew install tor
    ```
-
 2. **Set up terminal aliases (Optional but recommended):**
    Add these to your `~/.zshrc` for easy proxy management:
    ```zsh
@@ -18,7 +18,21 @@ This script requires macOS and Homebrew to install and run the Tor proxy locally
    alias tor-off='brew services stop tor'
    alias tor-reset='brew services restart tor'
    ```
-   *Run `source ~/.zshrc` to apply the changes.*
+
+### For Linux / ChromeOS (Debian/Ubuntu)
+1. **Install dependencies via APT:**
+   ```zsh
+   sudo apt update && sudo apt install zsh tor curl -y
+   ```
+2. **Set up terminal aliases (Optional but recommended):**
+   Add these to your shell profile (e.g., `~/.zshrc`) to map to the system service:
+   ```zsh
+   alias tor-on='sudo service tor start'
+   alias tor-off='sudo service tor stop'
+   alias tor-reload='sudo kill -HUP $(pidof tor)'
+   ```
+
+*Run `source ~/.zshrc` to apply any alias changes.*
 
 ## Setup
 
@@ -53,6 +67,19 @@ This script requires macOS and Homebrew to install and run the Tor proxy locally
    tor-off
    ```
 
+## Generating HTML Documentation
+
+If you prefer to read this documentation in a web browser, you can convert this Markdown file to a standalone HTML page using Pandoc.
+
+1. **Install Pandoc:**
+   * macOS: `brew install pandoc`
+   * Linux: `sudo apt install pandoc`
+2. **Convert the README:**
+   Run the following command in the same directory as this file:
+   ```zsh
+   pandoc README.md -f markdown -t html -s -o README.html
+   ```
+
 ## Output Legend
 
 The script evaluates the `curl` exit codes and HTTP status codes to provide specific diagnostics:
@@ -63,23 +90,9 @@ The script evaluates the `curl` exit codes and HTTP status codes to provide spec
 * **[SOCKS ERROR]** (Red): The Tor circuit was built, but the final exit node could not complete the connection to the host server.
 * **[TIMEOUT]** (Yellow): The connection hung and was dropped after 30 seconds. Often caused by silent firewall drops or WAF CAPTCHA loops that block automated requests.
 
-## Generating HTML Documentation
-
-If you prefer to read this documentation in a web browser, you can easily convert this Markdown file to a standalone HTML page using Pandoc.
-
-1. **Install Pandoc (if not already installed):**
-   ```zsh
-   brew install pandoc
-   ```
-
-2. **Convert the README:**
-   Run the following command in the same directory as this file:
-   ```zsh
-   pandoc README.md -f markdown -t html -s -o README.html
-   ```
-   *You can then open `README.html` directly in your browser.*
-
 ## License
+
+(cc) 2026 Joseph Lorenzo Hall
 
 This script is marked with CC0 1.0 Universal. 
 
