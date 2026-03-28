@@ -77,7 +77,7 @@ The script evaluates the `curl` exit codes and HTTP status codes to provide spec
 * **[FAIL]** (Red): Status 403, 1020, or 401. The server is actively dropping or blocking the request, likely due to a WAF rule targeting Tor exit nodes.
 * **[CERT ERROR]** (Purple): The destination server has an invalid, self-signed, or expired SSL/TLS certificate, terminating the secure connection before an HTTP status can be negotiated.
 * **[SOCKS ERROR]** (Red): The Tor circuit was built, but the final exit node could not complete the connection to the host server.
-* **[TIMEOUT]** (Yellow): The connection hung and was dropped after 30 seconds. Often caused by silent firewall drops or WAF CAPTCHA loops that block automated requests.
+* **[TIMEOUT]** (Yellow): The connection hung and was dropped after 60 seconds. Often caused by silent firewall drops or WAF CAPTCHA loops that block automated requests.
 
 
 ## Generating HTML Documentation
