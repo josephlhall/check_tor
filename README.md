@@ -80,19 +80,6 @@ The script evaluates the `curl` exit codes and HTTP status codes to provide spec
 * **[SOCKS ERROR]** (Red): The Tor circuit was built, but the final exit node could not complete the connection to the host server.
 * **[TIMEOUT]** (Yellow): The connection hung and was dropped after 60 seconds. Often caused by silent firewall drops or WAF CAPTCHA loops that block automated requests.
 
-## Generating HTML Documentation
-
-If you prefer to read this documentation in a web browser, you can convert this Markdown file to a standalone HTML page using Pandoc.
-
-1. **Install Pandoc:**
-   * macOS: `brew install pandoc`
-   * Linux: `sudo apt install pandoc`
-2. **Convert the README:**
-   Run the following command in the same directory as this file:
-   ```zsh
-   pandoc README.md -f markdown -t html -s -o README.html
-   ```
-
 ## License
 
 This project is dedicated to the public domain under CC0 1.0 Universal. See the `LICENSE` file for details.
