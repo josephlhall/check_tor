@@ -57,6 +57,8 @@ while IFS= read -r url || [[ -n "$url" ]]; do
         echo "[\033[32mPASS\033[0m] $url (Status: $http_code)"
     elif [[ "$http_code" == "403" || "$http_code" == "1020" || "$http_code" == "401" ]]; then
         echo "[\033[31mFAIL\033[0m] $url (Status: $http_code - Likely blocking Tor)"
+    elif [[ "$http_code" == "202" ]]; then
+        echo "[\033[36mCHALLENGE\033[0m] $url (Status: 202 - WAF JS Challenge or Async Queue)"
     else
         echo "[\033[33mWARNING\033[0m] $url (Status: $http_code, cURL exit: $curl_exit_code)"
     fi
