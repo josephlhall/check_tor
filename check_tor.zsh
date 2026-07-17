@@ -15,6 +15,7 @@ if [[ ! -f "$1" ]]; then
     exit 1
 fi
 
+echo "Using check_tor: https://github.com/josephlhall/check_tor"
 echo "Performing pre-flight check on the Internet to ensure Tor is running..."
 tor_check=$(curl -s --socks5-hostname "$TOR_PROXY" --max-time 10 https://check.torproject.org/api/ip)
 
