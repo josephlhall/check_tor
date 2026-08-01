@@ -4,10 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project overview
 
-`check_tor` is a single `zsh` script (`check_tor.zsh`, ~70 lines — the entire codebase) written
+`check_tor` is a single `zsh` script (`check_tor.zsh`, ~280 lines — the entire codebase) written
 for Project Galileo. It tests whether a list of domains is reachable over the Tor network,
 surfacing WAF blocks, TLS misconfigurations, and SOCKS failures that would prevent Tor users
-(e.g., at-risk journalists/activists/NGOs) from reaching those sites.
+(e.g., at-risk journalists/activists/NGOs) from reaching those sites, and diagnoses whether a
+block is Tor-specific and which WAF/CDN issued it.
 
 There is no build system, package manager, test suite, linter, or CI in this repo — there is
 nothing to build/lint/test. The only "command" is running the script itself:
@@ -31,28 +32,44 @@ about upstreaming).
 
 Everything lives in `check_tor.zsh`. Reading it top to bottom is the whole mental model:
 
-1. `TOR_PROXY="localhost:9050"` (line 4) — the only config value, hardcoded, no env override.
-2. Arg validation — requires exactly one CLI arg (path to a newline-delimited list of domains).
-3. Pre-flight check — curls `https://check.torproject.org/api/ip` through the SOCKS proxy and
-   greps for `"IsTor":true` before scanning anything; exits with an error telling the user to
-   run `tor-on` if Tor isn't confirmed active.
-4. Main loop — reads the target file line by line:
-   - Normalizes each URL: `http://` → `https://`, or prepends `https://` if no scheme is given.
-   - Fetches just the HTTP status code via `curl -o /dev/null -w "%{http_code}"`, routing DNS
-     through SOCKS5 (`--socks5-hostname`), following redirects (`-L`), spoofing a Chrome/Windows
-     User-Agent + Accept headers (to avoid trivial WAF/bot-fingerprint false positives), with a
-     60s timeout.
-   - Classifies the result from **both** the curl exit code and HTTP status code, in this
-     priority order: curl exit 97 → `SOCKS ERROR`; curl exit 60/51/35 → `CERT ERROR`; curl exit
-     28/7 → `TIMEOUT`; HTTP 200/301/302/307/308 → `PASS`; HTTP 403/1020/401 → `FAIL` (likely a
-     WAF blocking Tor); HTTP 202 → `CHALLENGE` (WAF JS challenge / async queue, e.g. Cloudflare);
-     anything else → `WARNING` (prints both codes for manual triage).
-   - Output is color-coded via inline ANSI escapes; there's no structured output format (no
-     JSON/CSV) and the script never writes files itself.
+1. Config block at the top — `TOR_PROXY` (localhost:9050), `MAX_CIRCUITS` (3), the three
+   timeouts, and the spoofed browser headers. All hardcoded, no env overrides.
+2. Output helpers — ANSI color vars, `print_line` (padded/aligned verdict column), and
+   `transient`/`clear_transient` for `\r`-overwritten progress lines (tty-only).
+3. Arg validation — requires exactly one CLI arg (path to a newline-delimited list of domains;
+   blank lines and `#` comments are skipped, CRs and surrounding whitespace stripped).
+4. `probe()` — one curl invocation. Writes body/headers to mktemp files (`$BODY`/`$HDRS`),
+   captures `%{http_code} %{num_redirects} %{time_appconnect} %{url_effective}` into
+   `probe_*` globals. Second arg is a circuit tag passed as `--proxy-user "$tag:x"` —
+   Tor's default `IsolateSOCKSAuth` gives each distinct credential its own circuit;
+   an empty tag means a direct clearnet request (no proxy).
+5. `blocker_id()` — fingerprints the responder from `$HDRS`/`$BODY`: Cloudflare 10xx error
+   codes (which appear in the *body* of an HTTP 403, never on the status line),
+   `cf-mitigated: challenge`, `cf-ray`, Akamai/Sucuri/Imperva signatures. Sets `$blocker`.
+6. `classify()` — sets `verdict` + `detail` from **both** the curl exit code and HTTP status,
+   curl exits first: 97/5 → `SOCKS`; 60/51/35 → `CERT`; 56/52 → `DROP` (reset / empty reply —
+   silent firewall drops); 28/7 → `TIMEOUT` (detail distinguishes post-TLS stall from no
+   response, via `time_appconnect`); 47 → redirect-loop `WARN`. Then HTTP: 200 → `PASS`
+   (unless it landed on a `/cdn-cgi/` challenge page → `CHALLENGE`); 401/403 → `FAIL` or
+   `CHALLENGE` (if managed challenge); 202 → `CHALLENGE`; 429 → `RATELIMIT`; 503 → `CHALLENGE`
+   if a WAF fingerprint is present else `WARN`; anything else → `WARN`.
+7. Pre-flight check — curls `https://check.torproject.org/api/ip` through the SOCKS proxy and
+   greps for `"IsTor":true` (also reports the current exit IP); exits with an error telling
+   the user to run `tor-on` if Tor isn't confirmed active.
+8. Main loop, per target: normalize URL (`http://` → `https://`, or prepend `https://`);
+   probe over Tor, retrying block-ish verdicts (`blocky()`: FAIL/CHALLENGE/RATELIMIT/DROP/
+   TIMEOUT/SOCKS) on up to `MAX_CIRCUITS` fresh circuits; if still blocked, run a clearnet
+   control probe — "blocked on clearnet too" marks the result not-Tor-specific and keeps it
+   out of the final summary list. Prints one aligned, color-coded line per domain.
+9. Summary — per-verdict counts plus a "Likely blocking or challenging Tor" list (Tor-specific
+   FAIL/CHALLENGE/RATELIMIT/DROP/SOCKS only). No structured output format (no JSON/CSV); the
+   script never writes files itself except its two mktemp scratch files (cleaned by trap).
 
 When changing the classification logic, keep the curl-exit-code checks ahead of the
 HTTP-status-code checks (a non-zero curl exit means the status-code variable is meaningless/empty),
-and update the "Output Legend" section of `README.md` to match.
+and update the "Output Legend" and "How results are diagnosed" sections of `README.md` to match.
+The script can be exercised end-to-end without a Tor daemon by putting a mock `curl` earlier in
+`$PATH` that keys off the requested hostname and the presence of `--socks5-hostname`.
 
 ## Data files are not code
 
