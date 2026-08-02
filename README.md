@@ -74,9 +74,9 @@ This script requires `zsh`, `curl`, and a local `tor` proxy to run.
 The script does more than fetch a status code:
 
 * **Multiple circuits before declaring a block.** A block-ish result (FAIL, CHALLENGE, RATE LIMIT, DROP, TIMEOUT, SOCKS ERROR) is retried on up to 3 fresh Tor circuits (via SOCKS credential isolation — no ControlPort needed). A site that fails on all 3 has a site-wide policy; a site that passes on retry was just rejecting one exit node's IP reputation, and is reported as PASS with a note.
-* **Clearnet control request.** A block that persists across circuits is re-tested *without* Tor. If the site blocks the same request from your real IP too, it isn't blocking Tor — it's blocking anything that smells like a script — and it's excluded from the "Likely blocking Tor" summary.
+* **A clearnet control request, compared by severity.** A block that persists across every circuit is re-tested *without* Tor, and the two results are ranked by how badly each impedes a real user: served normally, passable with friction (a challenge a browser can solve), or impassable. A site is only reported as blocking Tor when Tor fares *strictly worse* than an ordinary client. This clears sites that are simply hostile to every scripted client, and it catches escalation — a site that challenges everyone but hard-blocks Tor is flagged as "escalated for Tor". If the control request itself fails uninformatively (broken origin, TLS error), the result is labelled inconclusive and kept in the summary for a manual look.
 * **Blocker fingerprinting.** Response headers and bodies are inspected to name the blocker: Cloudflare error codes (1020 firewall rule, 1015 rate limit, 1006/1007/1008 IP ban — these ride inside an HTTP 403, not on the status line), `cf-mitigated: challenge` (managed challenge), Akamai, Sucuri, and Imperva/Incapsula signatures.
-* **Summary.** The scan ends with per-verdict counts and a list of domains that appear to be blocking or challenging Tor specifically.
+* **Summary.** The scan ends with per-verdict counts and a list of the domains where Tor was treated worse than an ordinary client.
 
 ## Output Legend
 
@@ -86,7 +86,7 @@ The script evaluates `curl` exit codes, HTTP status codes, and response contents
 * **[CHALLENGE]** (Cyan): The request reached the host, but a WAF is interposing a challenge: a Cloudflare managed challenge (403 + `cf-mitigated`), a JS challenge / under-attack page (503), an async queue (202), or a 200 that actually landed on a `/cdn-cgi/` challenge page. Tor users with JavaScript enabled may still get through, with friction.
 * **[RATE LIMIT]** (Yellow): Status 429. Not necessarily a deliberate Tor block, but exit IPs are shared by many users and burn through rate limits, so Tor users are effectively locked out.
 * **[FAIL]** (Red): Status 403 or 401 on every circuit tried. The server is actively refusing the request, likely a WAF rule targeting Tor exit nodes; the specific blocker (e.g. "Cloudflare 1020: blocked by a firewall rule") is named when identifiable.
-* **[DROP]** (Red): The TCP connection was reset mid-request (curl exit 56) or closed with no reply (exit 52) — the signature of a firewall silently killing Tor connections, arguably stronger block evidence than a 403.
+* **[DROP]** (Red): The TCP connection was reset mid-request (curl exit 56), closed with no reply (exit 52), or truncated mid-transfer (exit 18) — the signature of a firewall silently killing Tor connections, arguably stronger block evidence than a 403.
 * **[CERT ERROR]** (Purple): The destination server has an invalid, self-signed, or expired SSL/TLS certificate, terminating the secure connection before an HTTP status can be negotiated.
 * **[SOCKS ERROR]** (Red): The Tor circuit was built, but the exit node could not complete the connection to the host server.
 * **[TIMEOUT]** (Yellow): The connection hung. The detail distinguishes a stall *after* the TLS handshake (tarpitting) from never getting a response at all (silent drop or dead host).

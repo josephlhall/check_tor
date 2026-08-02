@@ -47,8 +47,8 @@ Everything lives in `check_tor.zsh`. Reading it top to bottom is the whole menta
    codes (which appear in the *body* of an HTTP 403, never on the status line),
    `cf-mitigated: challenge`, `cf-ray`, Akamai/Sucuri/Imperva signatures. Sets `$blocker`.
 6. `classify()` — sets `verdict` + `detail` from **both** the curl exit code and HTTP status,
-   curl exits first: 97/5 → `SOCKS`; 60/51/35 → `CERT`; 56/52 → `DROP` (reset / empty reply —
-   silent firewall drops); 28/7 → `TIMEOUT` (detail distinguishes post-TLS stall from no
+   curl exits first: 97/5 → `SOCKS`; 60/51/35 → `CERT`; 56/52/18 → `DROP` (reset / empty reply /
+   truncated transfer — silent firewall drops); 28/7 → `TIMEOUT` (detail distinguishes post-TLS stall from no
    response, via `time_appconnect`); 47 → redirect-loop `WARN`. Then HTTP: 200 → `PASS`
    (unless it landed on a `/cdn-cgi/` challenge page → `CHALLENGE`); 401/403 → `FAIL` or
    `CHALLENGE` (if managed challenge); 202 → `CHALLENGE`; 429 → `RATELIMIT`; 503 → `CHALLENGE`
@@ -59,11 +59,15 @@ Everything lives in `check_tor.zsh`. Reading it top to bottom is the whole menta
 8. Main loop, per target: normalize URL (`http://` → `https://`, or prepend `https://`);
    probe over Tor, retrying block-ish verdicts (`blocky()`: FAIL/CHALLENGE/RATELIMIT/DROP/
    TIMEOUT/SOCKS) on up to `MAX_CIRCUITS` fresh circuits; if still blocked, run a clearnet
-   control probe — "blocked on clearnet too" marks the result not-Tor-specific and keeps it
-   out of the final summary list. Prints one aligned, color-coded line per domain.
-9. Summary — per-verdict counts plus a "Likely blocking or challenging Tor" list (Tor-specific
-   FAIL/CHALLENGE/RATELIMIT/DROP/SOCKS only). No structured output format (no JSON/CSV); the
-   script never writes files itself except its two mktemp scratch files (cleaned by trap).
+   control probe and compare the two with `severity()` (PASS=0, CHALLENGE/RATELIMIT=1,
+   FAIL/DROP/TIMEOUT/SOCKS=2, anything else=-1 for inconclusive). Only a strictly *lower*
+   clearnet severity means Tor-specific; equal-or-worse clearnet clears the site as merely
+   script-hostile, and a negative clearnet severity is reported as inconclusive but still
+   listed. Prints one aligned, color-coded line per domain.
+9. Summary — per-verdict counts plus a "Likely blocking or challenging Tor" list (every blocky
+   verdict whose clearnet control fared better, or was inconclusive). No structured output
+   format (no JSON/CSV); the script never writes files itself except its two mktemp scratch
+   files (cleaned by trap).
 
 When changing the classification logic, keep the curl-exit-code checks ahead of the
 HTTP-status-code checks (a non-zero curl exit means the status-code variable is meaningless/empty),
