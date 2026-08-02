@@ -130,6 +130,7 @@ classify() {
         60|51|35) verdict=CERT;  detail="invalid, expired, or mismatched TLS certificate"; return ;;
         56)       verdict=DROP;  detail="connection reset mid-request — firewall likely dropping Tor"; return ;;
         52)       verdict=DROP;  detail="server accepted the connection, then went silent"; return ;;
+        18)       verdict=DROP;  detail="response truncated mid-transfer"; return ;;
         28|7)
             verdict=TIMEOUT
             if (( ${probe_tls:-0} > 0 )); then
@@ -180,6 +181,21 @@ classify() {
 
 # Verdicts that suggest a block, and are worth retrying / cross-checking.
 blocky() { [[ $1 == (FAIL|CHALLENGE|RATELIMIT|DROP|TIMEOUT|SOCKS) ]] }
+
+# Rank a verdict by how badly it impedes a real user, into global `sev`:
+#   0 = served fine   1 = passable with friction (a browser can solve it)
+#   2 = impassable    -1 = inconclusive, tells us nothing either way
+# Comparing the Tor verdict against the clearnet control this way is what
+# separates "blocks Tor" from "blocks everyone": only a site that treats Tor
+# *strictly worse* than an ordinary client is actually blocking Tor.
+severity() {
+    case $1 in
+        PASS)                    sev=0 ;;
+        CHALLENGE|RATELIMIT)     sev=1 ;;
+        FAIL|DROP|TIMEOUT|SOCKS) sev=2 ;;
+        *)                       sev=-1 ;;
+    esac
+}
 
 # -------------------------------------------------------------- pre-flight ---
 
@@ -240,26 +256,33 @@ for (( i = 1; i <= total; i++ )); do
         fi
     fi
 
-    # For persistent blocks, run a clearnet control request: does the site
-    # block Tor specifically, or does it block this scanner from anywhere?
+    # For persistent blocks, run a clearnet control request and compare how
+    # much worse Tor fared. Equal or gentler treatment on clearnet means the
+    # site is hostile to scripted clients generally, not to Tor.
     tor_specific=1
     if blocky "$tor_verdict"; then
         transient "[$i/$total] $url — clearnet control check"
         probe "$url" "" $TIMEOUT_CLEARNET
         classify
-        if [[ "$verdict" == PASS ]]; then
-            tor_detail+="; clearnet OK → Tor-specific"
-        elif [[ "$verdict" == "$tor_verdict" ]]; then
-            tor_detail+="; blocked on clearnet too → likely not Tor-specific"
-            tor_specific=0
+        severity "$tor_verdict"; tor_sev=$sev
+        severity "$verdict";     net_sev=$sev
+        if (( net_sev < 0 )); then
+            tor_detail+="; clearnet inconclusive ($verdict) — worth checking by hand"
+        elif (( net_sev < tor_sev )); then
+            if (( net_sev == 0 )); then
+                tor_detail+="; clearnet OK → Tor-specific"
+            else
+                tor_detail+="; clearnet only got $verdict → escalated for Tor"
+            fi
         else
-            tor_detail+="; clearnet got: $verdict"
+            tor_detail+="; clearnet fares no better ($verdict) → likely not Tor-specific"
+            tor_specific=0
         fi
     fi
 
     print_line "$tor_verdict" "$url" "$tor_detail"
     (( counts[$tor_verdict]++ ))
-    if blocky "$tor_verdict" && [[ "$tor_verdict" != TIMEOUT ]] && (( tor_specific )); then
+    if blocky "$tor_verdict" && (( tor_specific )); then
         blocked+=("$url ($tor_verdict)")
     fi
 done
