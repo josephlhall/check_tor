@@ -11,9 +11,12 @@
 TOR_PROXY="localhost:9050"
 
 # A site is only declared blocked after failing on this many different Tor
-# circuits. Fresh circuits are obtained by varying SOCKS credentials, which
-# Tor's default IsolateSOCKSAuth maps to separate circuits — no ControlPort
-# needed. This separates "blocks all of Tor" from "one exit has a bad IP rep".
+# circuits. Fresh circuits come from varying the SOCKS credentials: Tor's
+# default IsolateSOCKSAuth forbids streams with different credentials from
+# sharing a circuit, so no ControlPort is needed. Note this guarantees a
+# separate *circuit*, not a different exit relay — two circuits can
+# independently pick the same exit, so a repeat failure is suggestive of a
+# site-wide policy rather than proof of one.
 MAX_CIRCUITS=3
 
 # Per-request timeouts, in seconds.
@@ -68,54 +71,69 @@ fi
 
 # ----------------------------------------------------------------- probes ---
 
-BODY=$(mktemp) HDRS=$(mktemp)
-trap 'rm -f "$BODY" "$HDRS"' EXIT INT TERM
+BODY=$(mktemp) HDRS=$(mktemp) LASTH=$(mktemp)
+trap 'rm -f "$BODY" "$HDRS" "$LASTH"' EXIT INT TERM
 
 # probe <url> <circuit-tag|""> <timeout>
 # An empty circuit tag means a direct (clearnet) request with no proxy.
 # Results land in: probe_exit, probe_code, probe_redirs, probe_tls,
-# probe_final (effective URL after redirects), plus $BODY and $HDRS files.
+# probe_final (effective URL after redirects), probe_err (curl's own error
+# text), plus $BODY, $HDRS (every hop) and $LASTH (final hop only).
 probe() {
     local -a via=()
     [[ -n "$2" ]] && via=(--socks5-hostname "$TOR_PROXY" --proxy-user "$2:x")
-    : > "$BODY"; : > "$HDRS"
+    : > "$BODY"; : > "$HDRS"; : > "$LASTH"
     probe_timeout=$3
     local out
+    # %{errormsg} needs curl 7.75+; older curl skips it and leaves the field
+    # empty rather than shifting the others, so no version gate is needed.
     out=$(curl -s -o "$BODY" -D "$HDRS" -L --max-redirs 10 \
         -A "$USER_AGENT" -H "$ACCEPT_HDR" -H "$LANG_HDR" \
         "${via[@]}" --max-time "$3" \
-        -w '%{http_code} %{num_redirects} %{time_appconnect} %{url_effective}' \
-        "$1")
+        -w '%{http_code}\t%{num_redirects}\t%{time_appconnect}\t%{url_effective}\t%{errormsg}' \
+        "$1" 2>/dev/null)
     probe_exit=$?
-    read -r probe_code probe_redirs probe_tls probe_final <<< "$out"
+    IFS=$'\t' read -r probe_code probe_redirs probe_tls probe_final probe_err <<< "$out"
     probe_code=${probe_code:-000}
+
+    # With -L, curl appends *every* redirect hop's headers to $HDRS. Isolate
+    # the final block: a cf-ray on an intermediate redirect says nothing about
+    # who served the response we actually landed on, and grepping the whole
+    # file would credit that hop's WAF with the final hop's verdict.
+    awk '/^HTTP\//{n=NR} {l[NR]=$0} END{for (i=n; i<=NR; i++) print l[i]}' \
+        "$HDRS" > "$LASTH"
 }
 
-# Identify who issued the response we got, from headers and body. WAF block
-# pages carry fingerprints — notably Cloudflare, which serves its 10xx error
-# codes (1020 firewall rule, 1015 rate limit, ...) inside a plain HTTP 403.
+# Identify who issued the *final* response, from $LASTH and the body. WAF
+# block pages carry fingerprints — notably Cloudflare, which still serves its
+# 1xxx error codes (1020 firewall rule, 1015 rate limit, ...) in the body of a
+# plain HTTP 403, though newer edges may also set a cf-error-type header.
+# Strongest signals first: an explicit challenge marker beats an error code,
+# which beats "Cloudflare merely fronted this".
 blocker_id() {
     blocker=""
     local cf_err
-    cf_err=$(grep -aoE 'error code: 10[0-9]{2}' "$BODY" | grep -oE '10[0-9]{2}' | head -1)
-    if grep -qia '^cf-mitigated:.*challenge' "$HDRS"; then
-        blocker="Cloudflare managed challenge"
+    cf_err=$(grep -aoE 'error code: 1[0-9]{3}' "$BODY" | grep -oE '1[0-9]{3}' | head -1)
+    if grep -qia '^cf-mitigated:.*challenge' "$LASTH"; then
+        blocker="Cloudflare challenge (cf-mitigated)"
     elif [[ -n "$cf_err" ]]; then
         case "$cf_err" in
-            1020)           blocker="Cloudflare 1020: blocked by a firewall rule" ;;
-            1015)           blocker="Cloudflare 1015: rate limited" ;;
-            1006|1007|1008) blocker="Cloudflare $cf_err: IP banned" ;;
-            *)              blocker="Cloudflare error $cf_err" ;;
+            1020)                blocker="Cloudflare 1020: blocked by a firewall rule" ;;
+            1015)                blocker="Cloudflare 1015: rate limited" ;;
+            1006|1007|1008|1106) blocker="Cloudflare $cf_err: IP banned" ;;
+            *)                   blocker="Cloudflare error $cf_err" ;;
         esac
     elif grep -qa 'Just a moment' "$BODY" || grep -qa 'cf-chl' "$BODY"; then
-        blocker="Cloudflare JS challenge"
-    elif grep -qia '^cf-ray:' "$HDRS"; then
+        blocker="Cloudflare challenge page"
+    elif grep -qia '^cf-error-type:' "$LASTH"; then
+        blocker="Cloudflare error ($(grep -aim1 '^cf-error-type:' "$LASTH" | cut -d: -f2- | tr -d ' \r'))"
+    elif grep -qia '^cf-ray:' "$LASTH"; then
         blocker="served by Cloudflare"
-    elif grep -qia 'AkamaiGHost' "$HDRS"; then
+    elif grep -qia 'AkamaiGHost' "$LASTH"; then
         blocker="Akamai edge"
-    elif grep -qia '^x-sucuri-id:' "$HDRS"; then
+    elif grep -qiaE '^x-sucuri-(id|cache):' "$LASTH"; then
         blocker="Sucuri WAF"
-    elif grep -qiaE 'x-iinfo|incap_ses' "$HDRS" "$BODY"; then
+    elif grep -qia '^x-iinfo:' "$LASTH" || grep -qia 'incap_ses' "$LASTH"; then
         blocker="Imperva/Incapsula WAF"
     fi
 }
@@ -126,11 +144,20 @@ blocker_id() {
 classify() {
     verdict="" detail=""
     case $probe_exit in
-        97|5)     verdict=SOCKS; detail="Tor exit couldn't connect to the host"; return ;;
-        60|51|35) verdict=CERT;  detail="invalid, expired, or mismatched TLS certificate"; return ;;
-        56)       verdict=DROP;  detail="connection reset mid-request — firewall likely dropping Tor"; return ;;
-        52)       verdict=DROP;  detail="server accepted the connection, then went silent"; return ;;
-        18)       verdict=DROP;  detail="response truncated mid-transfer"; return ;;
+        5)     verdict=SOCKS; detail="couldn't resolve the SOCKS proxy — is Tor still running?"; return ;;
+        97)    # Covers every SOCKS5 reply Tor can return (host unreachable,
+               # connection refused, network unreachable, ...). curl collapses
+               # them all into one code, so lean on its error text for detail.
+               verdict=SOCKS; detail="proxy/SOCKS handshake failed"
+               [[ -n "$probe_err" ]] && detail+=" — $probe_err"
+               return ;;
+        60|51) verdict=CERT;  detail="TLS certificate verification failed"; return ;;
+        35)    verdict=CERT;  detail="TLS handshake failed"
+               [[ -n "$probe_err" ]] && detail+=" — $probe_err"
+               return ;;
+        56)    verdict=DROP;  detail="receive failure — connection likely reset mid-request"; return ;;
+        52)    verdict=DROP;  detail="server accepted the connection, then went silent"; return ;;
+        18)    verdict=DROP;  detail="response truncated mid-transfer"; return ;;
         28|7)
             verdict=TIMEOUT
             if (( ${probe_tls:-0} > 0 )); then
@@ -141,7 +168,9 @@ classify() {
             return ;;
         47) verdict=WARN; detail="redirect loop (more than 10 redirects)"; return ;;
         0)  ;;
-        *)  verdict=WARN; detail="curl exit $probe_exit (status $probe_code)"; return ;;
+        *)  verdict=WARN; detail="curl exit $probe_exit"
+            [[ -n "$probe_err" ]] && detail+=" — $probe_err"
+            return ;;
     esac
 
     blocker_id
@@ -252,7 +281,7 @@ for (( i = 1; i <= total; i++ )); do
         if blocky "$tor_verdict"; then
             tor_detail+=", on $MAX_CIRCUITS different circuits"
         else
-            tor_detail+=" (blocked on $(( attempt - 1 )) of $MAX_CIRCUITS circuits — exit-dependent, not site-wide)"
+            tor_detail+=" (blocked on $(( attempt - 1 )) of $MAX_CIRCUITS circuits — circuit-dependent, not site-wide)"
         fi
     fi
 
