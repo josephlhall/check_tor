@@ -1,31 +1,24 @@
-https://changeourfiberboards.com
-https://fashionforevergreen.org
-https://fashionforforests.com
-https://findfsc.org
-https://forestsfirst.org
-https://forestsforallforever.com
-https://forestsforallforever.de
-https://forestsforallforever.org
-https://forestsforfashion.com
-https://fsc.be
-https://fsc.dk
-https://fsc.nl
-https://fsc.org
-https://fsc.pl
-https://fsc-asiatradenetwork.org
-https://fscaustralia.org
-https://fsc-austria.at
-https://fsccontrolledwood.org
-https://fsc-deutschland.de
-https://fsc-eudr-journey.org
-https://fscfriday.org
-https://fsc-ic.org
-https://fsc-info.org
-https://fsc-oesterreich.at
-https://fsc-spain.org
-https://fsc-thailand.com
-https://fsc-uk.org
-https://fscus.com
-https://fscus.org
-https://lesserknowntimberspecies.com
-https://transparentforest.org
+# check_tor example target list — copy this, don't edit it in place.
+#
+# These are large, public, well-resourced sites plus deliberate TLS test
+# endpoints. They are safe to scan, and between them they exercise most of
+# the verdicts the script can produce.
+#
+# IMPORTANT: keep real target lists OUT of this repository. A list of
+# domains seeking protection is itself sensitive — see "Handling target
+# lists" in README.md. `targets.txt` and `scans/` are gitignored for
+# exactly this reason.
+
+# Well-known public sites
+torproject.org
+eff.org
+wikipedia.org
+archive.org
+mozilla.org
+letsencrypt.org
+ietf.org
+propublica.org
+
+# Deliberate TLS failure endpoints (badssl.com exists for this purpose)
+expired.badssl.com
+self-signed.badssl.com

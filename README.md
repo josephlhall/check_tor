@@ -38,7 +38,7 @@ This script requires `zsh`, `curl`, and a local `tor` proxy to run.
 
 ## Setup
 
-1. Place `check_tor.zsh` and your target list (e.g., `targets.txt`) in the same directory.
+1. Place `check_tor.zsh` somewhere convenient, and copy `targets-EXAMPLE.txt` to create your own list. Keep real target lists **outside** this repository — see [Handling target lists](#handling-target-lists).
 2. Make the script executable:
    ```zsh
    chmod +x check_tor.zsh
@@ -53,21 +53,43 @@ This script requires `zsh`, `curl`, and a local `tor` proxy to run.
    ```
 
 2. **Populate your target list:**
-   Add the domains you want to test to a text file, one per line. The script will automatically format them to enforce `https://`. Blank lines and lines starting with `#` are ignored.
+   Copy `targets-EXAMPLE.txt` and add the domains you want to test, one per line. The script will automatically format them to enforce `https://`. Blank lines and lines starting with `#` are ignored.
    ```zsh
-   emacs targets.txt
+   mkdir -p ~/tor-targets
+   cp targets-EXAMPLE.txt ~/tor-targets/mylist.txt
+   emacs ~/tor-targets/mylist.txt
    ```
 
 3. **Run the scanner:**
    Pass your text file as an argument to the script.
    ```zsh
-   ./check_tor.zsh targets.txt
+   ./check_tor.zsh ~/tor-targets/mylist.txt
    ```
 
 4. **Stop the Tor proxy (when finished):**
    ```zsh
    tor-off
    ```
+
+## Handling target lists
+
+**Do not commit real target lists.** A list of domains being checked for Tor reachability is a list of organizations that believe they are at risk and are seeking protection they do not yet have. Each domain is individually public, but the curated set is not — published, it is a pre-filtered reconnaissance aid that also implies which organizations are currently unprotected.
+
+Three things in this repository exist to prevent that:
+
+* `targets-EXAMPLE.txt` ships well-known public sites and deliberate TLS test endpoints, so the example list is safe to scan and to publish.
+* `targets.txt`, `scans/`, and `*.private.txt` are gitignored, so a real list does not become a commit by accident.
+* The script prints a warning if the target file you pass it is tracked by git.
+
+The safest arrangement is to keep real lists entirely outside the repository:
+
+```zsh
+mkdir -p ~/tor-targets
+cp targets-EXAMPLE.txt ~/tor-targets/mylist.txt
+./check_tor.zsh ~/tor-targets/mylist.txt
+```
+
+If a real list has already been committed, deleting it in a new commit is **not** enough — it stays in history and is retrievable with one command. Rewriting history (`git filter-repo --invert-paths --path <file>`) and force-pushing is the minimum, and you should assume anything public for a meaningful period may already have been cloned, forked, or archived independently.
 
 ## How results are diagnosed
 
@@ -86,7 +108,7 @@ The script evaluates `curl` exit codes, HTTP status codes, and response contents
 * **[CHALLENGE]** (Cyan): The request reached the host, but a WAF is interposing a challenge: a Cloudflare managed challenge (403 + `cf-mitigated`), a JS challenge / under-attack page (503), an async queue (202), or a 200 that actually landed on a `/cdn-cgi/` challenge page. Tor users with JavaScript enabled may still get through, with friction.
 * **[RATE LIMIT]** (Yellow): Status 429. Not necessarily a deliberate Tor block, but exit IPs are shared by many users and burn through rate limits, so Tor users are effectively locked out.
 * **[FAIL]** (Red): Status 403 or 401 on every circuit tried. The server is actively refusing the request, likely a WAF rule targeting Tor exit nodes; the specific blocker (e.g. "Cloudflare 1020: blocked by a firewall rule") is named when identifiable.
-* **[DROP]** (Red): The TCP connection was reset mid-request (curl exit 56), closed with no reply (exit 52), or truncated mid-transfer (exit 18) — the signature of a firewall silently killing Tor connections, arguably stronger block evidence than a 403.
+* **[DROP]** (Red): The connection failed while receiving data (curl exit 56 — commonly a mid-request reset), closed with no reply (exit 52), or was truncated mid-transfer (exit 18) — the signature of a firewall silently killing Tor connections, arguably stronger block evidence than a 403.
 * **[CERT ERROR]** (Purple): The destination server has an invalid, self-signed, or expired SSL/TLS certificate, terminating the secure connection before an HTTP status can be negotiated.
 * **[SOCKS ERROR]** (Red): The Tor circuit was built, but the exit node could not complete the connection to the host server.
 * **[TIMEOUT]** (Yellow): The connection hung. The detail distinguishes a stall *after* the TLS handshake (tarpitting) from never getting a response at all (silent drop or dead host).

@@ -69,6 +69,17 @@ if [[ ! -f "$1" ]]; then
     exit 1
 fi
 
+# A real target list names organizations that believe they are at risk and
+# are seeking protection they do not yet have. Published, it is a ready-made
+# reconnaissance aid. Warn loudly if this file is tracked by git.
+if git -C "${1:A:h}" rev-parse --is-inside-work-tree &>/dev/null \
+   && git -C "${1:A:h}" ls-files --error-unmatch "${1:A}" &>/dev/null; then
+    echo "[${YEL}WARNING${OFF}] '$1' is tracked by git and may be published."
+    echo "            If these are real targets, untrack them and keep the list"
+    echo "            outside the repo. See 'Handling target lists' in README.md."
+    echo ""
+fi
+
 # ----------------------------------------------------------------- probes ---
 
 BODY=$(mktemp) HDRS=$(mktemp) LASTH=$(mktemp)

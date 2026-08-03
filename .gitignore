@@ -1,1 +1,9 @@
 .DS_Store
+
+# Real target lists and scan archives must never be committed. A list of
+# domains seeking protection identifies organizations that may be at risk,
+# and publishing it hands an adversary a pre-filtered target list.
+# See "Handling target lists" in README.md.
+targets.txt
+scans/
+*.private.txt
