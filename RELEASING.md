@@ -89,15 +89,29 @@ git show --no-patch "$version"
 git push origin "$version"
 ```
 
-Create the corresponding GitHub Release from that existing tag. Review and edit
-the generated notes before confirming publication:
+Create the corresponding GitHub Release from that existing tag as a draft:
 
 ```zsh
 gh release create "$version" \
   --repo josephlhall/check_tor \
   --verify-tag \
   --title "check_tor $version" \
+  --draft \
   --generate-notes
+```
+
+Review the draft's title and generated notes for completeness and accuracy.
+Edit the draft as needed, then publish it:
+
+```zsh
+gh release view "$version" --repo josephlhall/check_tor
+reviewed_notes=/path/to/reviewed-release-notes.md
+gh release edit "$version" \
+  --repo josephlhall/check_tor \
+  --notes-file "$reviewed_notes"
+gh release edit "$version" \
+  --repo josephlhall/check_tor \
+  --draft=false
 ```
 
 Verify both publication records:
