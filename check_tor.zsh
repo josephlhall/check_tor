@@ -1,6 +1,6 @@
 #!/usr/bin/env zsh
 
-# check_tor.zsh — test whether a list of domains is reachable over the Tor
+# check_tor.zsh—test whether a list of domains is reachable over the Tor
 # network, and diagnose the nature of any blockage (WAF rule, JS challenge,
 # rate limit, silent drop, TLS breakage) before deciding a site "blocks Tor".
 # https://github.com/josephlhall/check_tor
@@ -16,7 +16,7 @@ TOR_PROXY="localhost:9050"
 # circuits. Fresh circuits come from varying the SOCKS credentials: Tor's
 # default IsolateSOCKSAuth forbids streams with different credentials from
 # sharing a circuit, so no ControlPort is needed. Note this guarantees a
-# separate *circuit*, not a different exit relay — two circuits can
+# separate *circuit*, not a different exit relay—two circuits can
 # independently pick the same exit, so a repeat failure is suggestive of a
 # site-wide policy rather than proof of one.
 MAX_CIRCUITS=3

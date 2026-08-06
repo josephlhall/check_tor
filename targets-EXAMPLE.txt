@@ -1,11 +1,11 @@
-# check_tor example target list — copy this, don't edit it in place.
+# check_tor example target list—copy this, don't edit it in place.
 #
 # These are large, public, well-resourced sites plus deliberate TLS test
 # endpoints. They are safe to scan, and between them they exercise most of
 # the verdicts the script can produce.
 #
 # IMPORTANT: keep real target lists OUT of this repository. A list of
-# domains seeking protection is itself sensitive — see "Handling target
+# domains seeking protection is itself sensitive—see "Handling target
 # lists" in README.md. `targets.txt` and `scans/` are gitignored for
 # exactly this reason.
 
