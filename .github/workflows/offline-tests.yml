@@ -1,0 +1,41 @@
+name: Offline tests
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install zsh on Linux
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes zsh
+
+      - name: Verify executable mode
+        run: test -x check_tor.zsh
+
+      - name: Check zsh syntax
+        run: zsh -n check_tor.zsh check_tor_core.zsh tests/check_tor_test.zsh
+
+      - name: Run offline regression tests
+        run: zsh tests/check_tor_test.zsh
