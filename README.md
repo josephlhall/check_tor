@@ -71,6 +71,17 @@ This script requires `zsh`, `curl`, and a local `tor` proxy to run.
    tor-off
    ```
 
+## Testing
+
+Run the deterministic offline regression suite with:
+
+```zsh
+zsh tests/check_tor_test.zsh
+```
+
+The suite uses synthetic responses and temporary files. It does not start Tor,
+make network requests, or use operational target lists.
+
 ## Handling target lists
 
 **Do not commit real target lists.** A list of domains being checked for Tor reachability is a list of organizations that believe they are at risk and are seeking protection they do not yet have. Each domain is individually public, but the curated set is not — published, it is a pre-filtered reconnaissance aid that also implies which organizations are currently unprotected.
