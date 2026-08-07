@@ -4,12 +4,17 @@
 # network, and diagnose the nature of any blockage (WAF rule, JS challenge,
 # rate limit, silent drop, TLS breakage) before deciding a site "blocks Tor".
 # https://github.com/josephlhall/check_tor
+#
+# The scanner is deliberately serial. Each probe replaces a shared set of
+# result variables and temporary response files; the scan loop classifies and
+# snapshots those results before starting another probe.
 
 # ----------------------------------------------------------------- config ---
 
+# Resolve the core relative to this script, not the caller's working directory.
 source "${0:A:h}/check_tor_core.zsh"
 
-# IP and port of your Tor SOCKS proxy.
+# Host and port of the Tor SOCKS proxy.
 TOR_PROXY="localhost:9050"
 
 # A site is only declared blocked after failing on this many different Tor
@@ -26,7 +31,8 @@ TIMEOUT_FIRST=60      # first attempt over Tor
 TIMEOUT_RETRY=30      # retries on fresh circuits
 TIMEOUT_CLEARNET=20   # control request without Tor
 
-# Browser-like headers, to avoid trivial bot-fingerprint false positives.
+# Browser-like headers reduce trivial bot-fingerprint differences, but they do
+# not make curl equivalent to Chrome: TLS and JavaScript behavior still differ.
 USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
 ACCEPT_HDR="Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
 LANG_HDR="Accept-Language: en-US,en;q=0.5"
@@ -89,17 +95,22 @@ trap 'rm -f "$BODY" "$HDRS" "$LASTH"' EXIT INT TERM
 
 # probe <url> <circuit-tag|""> <timeout>
 # An empty circuit tag means a direct (clearnet) request with no proxy.
-# Results land in: probe_exit, probe_code, probe_redirs, probe_tls,
-# probe_final (effective URL after redirects), probe_err (curl's own error
-# text), plus $BODY, $HDRS (every hop) and $LASTH (final hop only).
+# The timeout is in seconds. Results replace the probe_* globals plus $BODY,
+# $HDRS (every redirect hop), and $LASTH (the final hop only); callers must
+# consume or copy them before the next probe.
 probe() {
     local -a via=()
+    # socks5-hostname keeps DNS resolution inside Tor. The tag is a disposable
+    # SOCKS username, not a credential: with Tor's default IsolateSOCKSAuth,
+    # changing it asks Tor to place the stream on a fresh circuit.
     [[ -n "$2" ]] && via=(--socks5-hostname "$TOR_PROXY" --proxy-user "$2:x")
     : > "$BODY"; : > "$HDRS"; : > "$LASTH"
     probe_timeout=$3
     local out
-    # %{errormsg} needs curl 7.75+; older curl skips it and leaves the field
-    # empty rather than shifting the others, so no version gate is needed.
+    # curl's tab-delimited write-out is the probe's machine interface. Stderr
+    # is suppressed because %{errormsg} captures it without mixing diagnostics
+    # into scanner output. That field needs curl 7.75+; older curl leaves it
+    # empty without shifting the preceding fields, so no version gate is needed.
     out=$(curl -s -o "$BODY" -D "$HDRS" -L --max-redirs 10 \
         -A "$USER_AGENT" -H "$ACCEPT_HDR" -H "$LANG_HDR" \
         "${via[@]}" --max-time "$3" \
@@ -121,6 +132,8 @@ probe() {
 
 echo "${BLD}check_tor${OFF} · https://github.com/josephlhall/check_tor"
 echo "Performing pre-flight check to ensure Tor is running..."
+# This checks more than whether a SOCKS port accepts connections: Tor's service
+# confirms that the request emerged from its network and reports the exit IP.
 tor_check=$(curl -s --socks5-hostname "$TOR_PROXY" --max-time 10 https://check.torproject.org/api/ip)
 
 if [[ "$tor_check" == *'"IsTor":true'* ]]; then
@@ -149,6 +162,8 @@ echo "$RULE"
 typeset -A counts
 blocked=()
 
+# zsh arrays are one-indexed by default; keep this bound aligned with that
+# convention if target storage changes.
 for (( i = 1; i <= total; i++ )); do
     url=${targets[$i]}
 
@@ -156,7 +171,9 @@ for (( i = 1; i <= total; i++ )); do
     url=${url/#http:\/\//https:\/\/}
     [[ "$url" =~ ^https?:// ]] || url="https://$url"
 
-    # Try over Tor, re-trying block-ish results on fresh circuits.
+    # Retry only results for which another exit could plausibly change the
+    # outcome. Certificate errors and unknown failures instead remain visible
+    # for manual diagnosis without spending additional circuits.
     attempt=1
     while true; do
         transient "[$i/$total] $url — Tor circuit $attempt/$MAX_CIRCUITS"
@@ -166,6 +183,8 @@ for (( i = 1; i <= total; i++ )); do
         (( attempt == MAX_CIRCUITS )) && break
         (( attempt++ ))
     done
+    # The clearnet control below calls classify again and overwrites its global
+    # outputs, so preserve the final Tor result first.
     tor_verdict=$verdict tor_detail=$detail
 
     if (( attempt > 1 )); then
