@@ -52,6 +52,7 @@ assert_not_contains() {
 
 FAKE_BIN="$TEST_TMP/bin"
 mkdir "$FAKE_BIN"
+zsh_executable=${commands[zsh]}
 
 cat > "$FAKE_BIN/curl" <<'FAKE_CURL'
 #!/usr/bin/env zsh
@@ -115,6 +116,65 @@ fi
 printf '%s\t0\t0.1\t%s\t\n' "$code" "$url"
 FAKE_CURL
 chmod +x "$FAKE_BIN/curl"
+
+# Sourcing from an unrelated working directory must load definitions without
+# treating caller arguments as scanner arguments or installing side effects.
+source_case="$TEST_TMP/source"
+mkdir "$source_case" "$source_case/scanner-tmp"
+: > "$source_case/curl.log"
+set +e
+CHECK_TOR_FAKE_SCENARIO=all_pass \
+CHECK_TOR_FAKE_STATE="$source_case/curl.state" \
+CHECK_TOR_FAKE_LOG="$source_case/curl.log" \
+CHECK_TOR_SOURCE_TRAP="$source_case/caller-trap" \
+TMPDIR="$source_case/scanner-tmp" \
+PATH="$FAKE_BIN:/usr/bin:/bin" \
+    "$zsh_executable" -c '
+        script_path=$1 source_workdir=$2
+        cd "$source_workdir"
+        set -- caller-argument second-argument
+        trap '\''print -r -- "$#:$1:$2" > "$CHECK_TOR_SOURCE_TRAP"'\'' EXIT
+        source "$script_path"
+        [[ $# == 2 && $1 == caller-argument && $2 == second-argument ]] || exit 10
+        (( $+functions[configure_output] && $+functions[usage] &&
+           $+functions[probe] && $+functions[main] )) || exit 11
+    ' zsh "$REPO_ROOT/check_tor.zsh" "$source_case" \
+    > "$source_case/stdout" 2> "$source_case/stderr"
+source_status=$?
+set -e
+assert_eq "source status" 0 "$source_status"
+assert_eq "source stdout" "" "$(< "$source_case/stdout")"
+assert_eq "source stderr" "" "$(< "$source_case/stderr")"
+assert_eq "source preserves caller arguments and trap" \
+    "2:caller-argument:second-argument" "$(< "$source_case/caller-trap")"
+assert_eq "source curl calls" "" "$(< "$source_case/curl.log")"
+assert_eq "source temporary files" 0 "$(find "$source_case/scanner-tmp" -type f | wc -l | tr -d ' ')"
+
+# Calling main after sourcing owns its temporary files and restores the
+# caller's EXIT trap when it returns.
+sourced_main_case="$TEST_TMP/sourced-main"
+mkdir "$sourced_main_case" "$sourced_main_case/scanner-tmp"
+print -r -- "sourced-main.example.test" > "$sourced_main_case/targets.txt"
+: > "$sourced_main_case/curl.log"
+set +e
+CHECK_TOR_FAKE_SCENARIO=all_pass \
+CHECK_TOR_FAKE_STATE="$sourced_main_case/curl.state" \
+CHECK_TOR_FAKE_LOG="$sourced_main_case/curl.log" \
+CHECK_TOR_SOURCE_TRAP="$sourced_main_case/caller-trap" \
+TMPDIR="$sourced_main_case/scanner-tmp" \
+PATH="$FAKE_BIN:/usr/bin:/bin" \
+    "$zsh_executable" -c '
+        source "$1"
+        trap '\''print -r -- preserved > "$CHECK_TOR_SOURCE_TRAP"'\'' EXIT
+        main "$2"
+    ' zsh "$REPO_ROOT/check_tor.zsh" "$sourced_main_case/targets.txt" \
+    > "$sourced_main_case/stdout" 2> "$sourced_main_case/stderr"
+sourced_main_status=$?
+set -e
+assert_eq "sourced main status" 0 "$sourced_main_status"
+assert_eq "sourced main stderr" "" "$(< "$sourced_main_case/stderr")"
+assert_eq "sourced main preserves caller trap" "preserved" "$(< "$sourced_main_case/caller-trap")"
+assert_eq "sourced main temporary cleanup" 0 "$(find "$sourced_main_case/scanner-tmp" -type f | wc -l | tr -d ' ')"
 
 # Capture streams separately because their separation is part of the command's
 # public contract. Keep scanner temporary files apart from harness state so an
@@ -185,7 +245,6 @@ mkdir "$dependency_case" "$dependency_case/bin"
 ln -s "$FAKE_BIN/curl" "$dependency_case/bin/curl"
 print -r -- "dependency.example.test" > "$dependency_case/targets.txt"
 : > "$dependency_case/curl.log"
-zsh_executable=${commands[zsh]}
 set +e
 CHECK_TOR_FAKE_LOG="$dependency_case/curl.log" PATH="$dependency_case/bin" \
     "$zsh_executable" "$REPO_ROOT/check_tor.zsh" "$dependency_case/targets.txt" \
