@@ -106,9 +106,9 @@ The repository has two complementary suites:
   and Tor-versus-clearnet comparisons.
 * `tests/check_tor_integration_test.zsh` invokes `check_tor.zsh` as a user would.
   It places a controlled fake `curl` first in `PATH` to test argument failures,
-  target parsing and normalization, circuit retries, clearnet controls, output
-  summaries, curl arguments, and temporary-file cleanup without reaching the
-  network.
+  source-safe loading, target parsing and normalization, circuit retries,
+  clearnet controls, output summaries, curl arguments, and temporary-file
+  cleanup without reaching the network.
 
 Run the complete local validation from the repository root:
 
@@ -121,7 +121,7 @@ git diff --check
 ```
 
 A successful run reports `All 64 offline checks passed.` and
-`All 45 offline integration checks passed.` The **Offline tests** GitHub Actions
+`All 55 offline integration checks passed.` The **Offline tests** GitHub Actions
 workflow runs the same syntax and test commands on Ubuntu and macOS for every
 pull request and push to `main`; it can also be started manually.
 
