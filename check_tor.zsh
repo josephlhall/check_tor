@@ -39,8 +39,12 @@ LANG_HDR="Accept-Language: en-US,en;q=0.5"
 
 # ----------------------------------------------------------------- output ---
 
-RED=$'\033[31m' GRN=$'\033[32m' YEL=$'\033[33m' MAG=$'\033[35m'
-CYN=$'\033[36m' DIM=$'\033[2m'  BLD=$'\033[1m'  OFF=$'\033[0m'
+if [[ -t 1 ]] && (( ! ${+NO_COLOR} )); then
+    RED=$'\033[31m' GRN=$'\033[32m' YEL=$'\033[33m' MAG=$'\033[35m'
+    CYN=$'\033[36m' DIM=$'\033[2m'  BLD=$'\033[1m'  OFF=$'\033[0m'
+else
+    RED="" GRN="" YEL="" MAG="" CYN="" DIM="" BLD="" OFF=""
+fi
 RULE="─────────────────────────────────────────────────────────"
 
 # Transient one-line progress messages (only when stdout is a terminal).
@@ -67,25 +71,83 @@ print_line() {  # $1=verdict key  $2=url  $3=detail
 
 # ------------------------------------------------------------ arg parsing ---
 
-if [[ -z "$1" ]]; then
-    echo "Usage: ./check_tor.zsh <file_with_urls.txt>"
+usage() {
+    print -r -- "Usage: ./check_tor.zsh <file_with_urls.txt>"
+    print -r -- "       ./check_tor.zsh --help"
+    print -r -- ""
+    print -r -- "Scan each nonblank, non-comment target through a local Tor proxy."
+    print -r -- "Targets without a scheme, and http:// targets, are tested as https://."
+    print -r -- ""
+    print -r -- "Options:"
+    print -r -- "  -h, --help  Show this help and exit."
+    print -r -- ""
+    print -r -- "Environment:"
+    print -r -- "  NO_COLOR    Disable ANSI color styling."
+    print -r -- ""
+    print -r -- "Exit status:"
+    print -r -- "  0  Scan completed, regardless of findings."
+    print -r -- "  1  Invocation, input, dependency, or Tor preflight failure."
+}
+
+if (( $# == 1 )) && [[ "$1" == (-h|--help) ]]; then
+    usage
+    exit 0
+fi
+
+if (( $# != 1 )); then
+    print -u2 -r -- "Error: expected exactly one target file."
+    usage >&2
     exit 1
 fi
 
 if [[ ! -f "$1" ]]; then
-    echo "Error: File '$1' not found."
+    print -u2 -r -- "Error: file '$1' not found or is not a regular file."
+    exit 1
+fi
+
+if [[ ! -r "$1" ]]; then
+    print -u2 -r -- "Error: file '$1' is not readable."
+    exit 1
+fi
+
+# Load and validate targets before checking dependencies or contacting Tor.
+# An input containing only whitespace and comments is operationally equivalent
+# to an empty file and is rejected rather than reported as a successful scan.
+targets=()
+while IFS= read -r line || [[ -n "$line" ]]; do
+    line=${line//$'\r'/}
+    line="${line#"${line%%[![:space:]]*}"}"
+    line="${line%"${line##*[![:space:]]}"}"
+    [[ -z "$line" || "$line" == \#* ]] && continue
+    targets+=("$line")
+done < "$1"
+total=${#targets[@]}
+
+if (( total == 0 )); then
+    print -u2 -r -- "Error: file '$1' contains no targets."
+    exit 1
+fi
+
+required_commands=(curl awk grep head cut tr mktemp)
+missing_commands=()
+for required_command in "${required_commands[@]}"; do
+    (( $+commands[$required_command] )) || missing_commands+=("$required_command")
+done
+if (( ${#missing_commands[@]} > 0 )); then
+    print -u2 -r -- "Error: missing required command(s): ${(j:, :)missing_commands}"
     exit 1
 fi
 
 # A real target list names organizations that believe they are at risk and
 # are seeking protection they do not yet have. Published, it is a ready-made
 # reconnaissance aid. Warn loudly if this file is tracked by git.
-if git -C "${1:A:h}" rev-parse --is-inside-work-tree &>/dev/null \
+if (( $+commands[git] )) \
+   && git -C "${1:A:h}" rev-parse --is-inside-work-tree &>/dev/null \
    && git -C "${1:A:h}" ls-files --error-unmatch "${1:A}" &>/dev/null; then
-    echo "[${YEL}WARNING${OFF}] '$1' is tracked by git and may be published."
-    echo "            If these are real targets, untrack them and keep the list"
-    echo "            outside the repo. See 'Handling target lists' in README.md."
-    echo ""
+    print -u2 -r -- "[${YEL}WARNING${OFF}] '$1' is tracked by git and may be published."
+    print -u2 -r -- "            If these are real targets, untrack them and keep the list"
+    print -u2 -r -- "            outside the repo. See 'Handling target lists' in README.md."
+    print -u2 -r -- ""
 fi
 
 # ----------------------------------------------------------------- probes ---
@@ -140,22 +202,11 @@ if [[ "$tor_check" == *'"IsTor":true'* ]]; then
     exit_ip=${tor_check#*\"IP\":\"} exit_ip=${exit_ip%%\"*}
     echo "[${GRN}SUCCESS${OFF}] Tor connection verified (current exit: ${exit_ip:-unknown}). Starting scan..."
 else
-    echo "[${RED}ERROR${OFF}] Tor connection failed. Did you remember to run 'tor-on'?"
+    print -u2 -r -- "[${RED}ERROR${OFF}] Tor connection failed. Did you remember to run 'tor-on'?"
     exit 1
 fi
 
 # -------------------------------------------------------------- main scan ---
-
-# Read targets up front: skip blank lines and #comments, strip CR/whitespace.
-targets=()
-while IFS= read -r line || [[ -n "$line" ]]; do
-    line=${line//$'\r'/}
-    line="${line#"${line%%[![:space:]]*}"}"
-    line="${line%"${line##*[![:space:]]}"}"
-    [[ -z "$line" || "$line" == \#* ]] && continue
-    targets+=("$line")
-done < "$1"
-total=${#targets[@]}
 
 echo "$RULE"
 

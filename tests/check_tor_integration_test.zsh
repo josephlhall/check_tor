@@ -41,6 +41,15 @@ assert_eq() {
     fi
 }
 
+assert_not_contains() {
+    local name=$1 unexpected=$2 actual=$3
+    if [[ "$actual" != *"$unexpected"* ]]; then
+        pass
+    else
+        fail "$name: expected output not to contain '$unexpected'"
+    fi
+}
+
 FAKE_BIN="$TEST_TMP/bin"
 mkdir "$FAKE_BIN"
 
@@ -66,7 +75,11 @@ done
 print -r -- "$*" >> "$CHECK_TOR_FAKE_LOG"
 
 if [[ "$url" == "https://check.torproject.org/api/ip" ]]; then
-    print -r -- '{"IsTor":true,"IP":"192.0.2.10"}'
+    if [[ "$CHECK_TOR_FAKE_SCENARIO" == preflight_fail ]]; then
+        print -r -- '{"IsTor":false}'
+    else
+        print -r -- '{"IsTor":true,"IP":"192.0.2.10"}'
+    fi
     exit 0
 fi
 
@@ -103,46 +116,101 @@ printf '%s\t0\t0.1\t%s\t\n' "$code" "$url"
 FAKE_CURL
 chmod +x "$FAKE_BIN/curl"
 
-# Keep the scanner's temporary response files separate from harness state so
-# an empty directory proves its EXIT trap removed every file it created.
+# Capture streams separately because their separation is part of the command's
+# public contract. Keep scanner temporary files apart from harness state so an
+# empty directory proves its EXIT trap removed every file it created.
 run_scanner() {
     local scenario=$1 input=$2 case_dir=$3
     mkdir -p "$case_dir/scanner-tmp"
     : > "$case_dir/curl.log"
+    set +e
     CHECK_TOR_FAKE_SCENARIO=$scenario \
     CHECK_TOR_FAKE_STATE="$case_dir/curl.state" \
     CHECK_TOR_FAKE_LOG="$case_dir/curl.log" \
     TMPDIR="$case_dir/scanner-tmp" \
     PATH="$FAKE_BIN:/usr/bin:/bin" \
-        "$REPO_ROOT/check_tor.zsh" "$input" 2>&1
+        "$REPO_ROOT/check_tor.zsh" "$input" \
+        > "$case_dir/stdout" 2> "$case_dir/stderr"
+    scanner_status=$?
+    set -e
+    scanner_stdout=$(< "$case_dir/stdout")
+    scanner_stderr=$(< "$case_dir/stderr")
 }
 
-plain_output() {
-    sed $'s/\033\\[[0-9;]*m//g'
-}
-
-# Missing and invalid inputs fail before curl (real or fake) can run.
+# Help and invalid invocation fail or return before curl (real or fake) can run.
+cli_case="$TEST_TMP/cli"
+mkdir "$cli_case"
+: > "$cli_case/curl.log"
 set +e
-missing_output=$(PATH="$FAKE_BIN:/usr/bin:/bin" "$REPO_ROOT/check_tor.zsh" 2>&1)
+CHECK_TOR_FAKE_LOG="$cli_case/curl.log" PATH="$FAKE_BIN:/usr/bin:/bin" \
+    "$REPO_ROOT/check_tor.zsh" --help > "$cli_case/help.out" 2> "$cli_case/help.err"
+help_status=$?
+CHECK_TOR_FAKE_LOG="$cli_case/curl.log" PATH="$FAKE_BIN:/usr/bin:/bin" \
+    "$REPO_ROOT/check_tor.zsh" > "$cli_case/missing.out" 2> "$cli_case/missing.err"
 missing_status=$?
-invalid_output=$(PATH="$FAKE_BIN:/usr/bin:/bin" "$REPO_ROOT/check_tor.zsh" "$TEST_TMP/absent.txt" 2>&1)
+CHECK_TOR_FAKE_LOG="$cli_case/curl.log" PATH="$FAKE_BIN:/usr/bin:/bin" \
+    "$REPO_ROOT/check_tor.zsh" one.txt two.txt > "$cli_case/extra.out" 2> "$cli_case/extra.err"
+extra_status=$?
+CHECK_TOR_FAKE_LOG="$cli_case/curl.log" PATH="$FAKE_BIN:/usr/bin:/bin" \
+    "$REPO_ROOT/check_tor.zsh" "$TEST_TMP/absent.txt" > "$cli_case/invalid.out" 2> "$cli_case/invalid.err"
 invalid_status=$?
 set -e
+assert_eq "help status" 0 "$help_status"
+assert_contains "help usage" "Usage:" "$(< "$cli_case/help.out")"
+assert_contains "help documents NO_COLOR" "NO_COLOR" "$(< "$cli_case/help.out")"
+assert_eq "help stderr" "" "$(< "$cli_case/help.err")"
 assert_eq "missing argument status" 1 "$missing_status"
-assert_contains "missing argument usage" "Usage:" "$missing_output"
+assert_eq "missing argument stdout" "" "$(< "$cli_case/missing.out")"
+assert_contains "missing argument usage" "Usage:" "$(< "$cli_case/missing.err")"
+assert_eq "extra argument status" 1 "$extra_status"
+assert_contains "extra argument diagnostic" "exactly one target file" "$(< "$cli_case/extra.err")"
 assert_eq "missing file status" 1 "$invalid_status"
-assert_contains "missing file diagnostic" "not found" "$invalid_output"
+assert_eq "missing file stdout" "" "$(< "$cli_case/invalid.out")"
+assert_contains "missing file diagnostic" "not found" "$(< "$cli_case/invalid.err")"
+assert_eq "invalid invocation curl calls" "" "$(< "$cli_case/curl.log")"
+
+# Empty and comment-only files are rejected before dependency or Tor checks.
+empty_case="$TEST_TMP/empty"
+mkdir "$empty_case"
+print -r -- $'\n  # no targets\n  \n' > "$empty_case/targets.txt"
+run_scanner all_pass "$empty_case/targets.txt" "$empty_case"
+assert_eq "empty input status" 1 "$scanner_status"
+assert_eq "empty input stdout" "" "$scanner_stdout"
+assert_contains "empty input diagnostic" "contains no targets" "$scanner_stderr"
+assert_eq "empty input curl calls" "" "$(< "$empty_case/curl.log")"
+
+# A missing runtime command is diagnosed before temporary files or Tor access.
+dependency_case="$TEST_TMP/dependency"
+mkdir "$dependency_case" "$dependency_case/bin"
+ln -s "$FAKE_BIN/curl" "$dependency_case/bin/curl"
+print -r -- "dependency.example.test" > "$dependency_case/targets.txt"
+: > "$dependency_case/curl.log"
+zsh_executable=${commands[zsh]}
+set +e
+CHECK_TOR_FAKE_LOG="$dependency_case/curl.log" PATH="$dependency_case/bin" \
+    "$zsh_executable" "$REPO_ROOT/check_tor.zsh" "$dependency_case/targets.txt" \
+    > "$dependency_case/stdout" 2> "$dependency_case/stderr"
+dependency_status=$?
+set -e
+assert_eq "missing dependency status" 1 "$dependency_status"
+assert_eq "missing dependency stdout" "" "$(< "$dependency_case/stdout")"
+assert_contains "missing dependency diagnostic" "missing required command(s)" "$(< "$dependency_case/stderr")"
+assert_contains "missing awk diagnostic" "awk" "$(< "$dependency_case/stderr")"
+assert_eq "missing dependency curl calls" "" "$(< "$dependency_case/curl.log")"
 
 # Parsing and normalization: blank/comment lines disappear, http is upgraded,
 # and a bare hostname receives an https scheme.
 parse_case="$TEST_TMP/parse"
 mkdir "$parse_case"
 print -r -- $'\n  # synthetic targets only\nhttp://alpha.example.test\n  beta.example.test  \n' > "$parse_case/targets.txt"
-parse_output=$(run_scanner all_pass "$parse_case/targets.txt" "$parse_case" | plain_output)
-assert_contains "http upgraded" "https://alpha.example.test" "$parse_output"
-assert_contains "scheme added" "https://beta.example.test" "$parse_output"
-assert_contains "parse summary total" "Scanned 2 domain(s):" "$parse_output"
-assert_contains "parse summary passes" "2 PASS" "$parse_output"
+run_scanner all_pass "$parse_case/targets.txt" "$parse_case"
+assert_eq "successful scan status" 0 "$scanner_status"
+assert_eq "successful scan stderr" "" "$scanner_stderr"
+assert_contains "http upgraded" "https://alpha.example.test" "$scanner_stdout"
+assert_contains "scheme added" "https://beta.example.test" "$scanner_stdout"
+assert_contains "parse summary total" "Scanned 2 domain(s):" "$scanner_stdout"
+assert_contains "parse summary passes" "2 PASS" "$scanner_stdout"
+assert_not_contains "redirected output has no ANSI" $'\033[' "$scanner_stdout"
 assert_eq "parse probe count" 2 "$(< "$parse_case/curl.state")"
 assert_eq "parse temporary cleanup" 0 "$(find "$parse_case/scanner-tmp" -type f | wc -l | tr -d ' ')"
 
@@ -151,9 +219,9 @@ assert_eq "parse temporary cleanup" 0 "$(find "$parse_case/scanner-tmp" -type f 
 retry_case="$TEST_TMP/retry"
 mkdir "$retry_case"
 print -r -- "retry.example.test" > "$retry_case/targets.txt"
-retry_output=$(run_scanner retry_then_pass "$retry_case/targets.txt" "$retry_case" | plain_output)
-assert_contains "retry final verdict" "[PASS]" "$retry_output"
-assert_contains "retry explanation" "blocked on 1 of 3 circuits" "$retry_output"
+run_scanner retry_then_pass "$retry_case/targets.txt" "$retry_case"
+assert_contains "retry final verdict" "[PASS]" "$scanner_stdout"
+assert_contains "retry explanation" "blocked on 1 of 3 circuits" "$scanner_stdout"
 assert_eq "retry probe count" 2 "$(< "$retry_case/curl.state")"
 assert_eq "retry used isolated credentials" 2 "$(grep -c -- '--proxy-user' "$retry_case/curl.log")"
 
@@ -162,14 +230,24 @@ assert_eq "retry used isolated credentials" 2 "$(grep -c -- '--proxy-user' "$ret
 block_case="$TEST_TMP/block"
 mkdir "$block_case"
 print -r -- "blocked.example.test" > "$block_case/targets.txt"
-block_output=$(run_scanner persistent_tor_block "$block_case/targets.txt" "$block_case" | plain_output)
-assert_contains "persistent verdict" "[FAIL]" "$block_output"
-assert_contains "persistent circuit detail" "on 3 different circuits" "$block_output"
-assert_contains "clearnet comparison" "clearnet OK → Tor-specific" "$block_output"
-assert_contains "blocked summary count" "1 FAIL" "$block_output"
-assert_contains "blocked target list" "blocked.example.test (FAIL)" "$block_output"
+run_scanner persistent_tor_block "$block_case/targets.txt" "$block_case"
+assert_contains "persistent verdict" "[FAIL]" "$scanner_stdout"
+assert_contains "persistent circuit detail" "on 3 different circuits" "$scanner_stdout"
+assert_contains "clearnet comparison" "clearnet OK → Tor-specific" "$scanner_stdout"
+assert_contains "blocked summary count" "1 FAIL" "$scanner_stdout"
+assert_contains "blocked target list" "blocked.example.test (FAIL)" "$scanner_stdout"
 assert_eq "persistent probe count" 4 "$(< "$block_case/curl.state")"
 assert_eq "three Tor probes" 3 "$(grep -c -- '--proxy-user' "$block_case/curl.log")"
+
+# Preflight failures preserve normal progress on stdout and diagnose the fatal
+# condition on stderr.
+preflight_case="$TEST_TMP/preflight"
+mkdir "$preflight_case"
+print -r -- "preflight.example.test" > "$preflight_case/targets.txt"
+run_scanner preflight_fail "$preflight_case/targets.txt" "$preflight_case"
+assert_eq "preflight failure status" 1 "$scanner_status"
+assert_contains "preflight progress stdout" "Performing pre-flight check" "$scanner_stdout"
+assert_contains "preflight diagnostic stderr" "Tor connection failed" "$scanner_stderr"
 
 if (( failures > 0 )); then
     print -u2 -- "$failures of $tests checks failed"
