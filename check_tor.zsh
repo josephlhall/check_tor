@@ -63,8 +63,8 @@ configure_output() {
 }
 
 # Transient one-line progress messages (only when stdout is a terminal).
-transient()       { [[ -t 1 ]] && printf '\r\033[K%s%s%s' "$DIM" "$1" "$OFF" }
-clear_transient() { [[ -t 1 ]] && printf '\r\033[K' }
+transient()       { [[ ${OUTPUT_FORMAT:-text} == text && -t 1 ]] && printf '\r\033[K%s%s%s' "$DIM" "$1" "$OFF" }
+clear_transient() { [[ ${OUTPUT_FORMAT:-text} == text && -t 1 ]] && printf '\r\033[K' }
 
 print_line() {  # $1=verdict key  $2=url  $3=detail
     local label color
@@ -84,15 +84,71 @@ print_line() {  # $1=verdict key  $2=url  $3=detail
         "$color" "$label" "$OFF" $(( 12 - ${#label} )) '' "$2" "$DIM" "$3" "$OFF"
 }
 
+# Quote one shell string as a JSON string without requiring jq or another
+# runtime dependency. JSON permits Unicode directly, but every ASCII control
+# character must be escaped even when it came from an unusual target name or
+# a curl diagnostic.
+json_quote() {
+    local value=$1 escaped="" char code i
+    for (( i = 1; i <= ${#value}; i++ )); do
+        char=${value[$i]}
+        case $char in
+            '"') escaped+='\"' ;;
+            '\') escaped+='\\' ;;
+            *)
+                printf -v code '%d' "'$char"
+                if (( code < 32 )); then
+                    printf -v char '\\u%04x' "$code"
+                fi
+                escaped+=$char
+                ;;
+        esac
+    done
+    REPLY="\"$escaped\""
+}
+
+print_json_target() {
+    local target=$1 verdict_key=$2 result_detail=$3 attempts=$4
+    local control_performed=$5 control_verdict=$6 tor_specific_json=$7 body_limited=$8
+    local target_json verdict_json detail_json control_verdict_json
+    local control_performed_json=false body_limited_json=false
+
+    json_quote "$target"; target_json=$REPLY
+    json_quote "$verdict_key"; verdict_json=$REPLY
+    json_quote "$result_detail"; detail_json=$REPLY
+    if (( control_performed )); then
+        json_quote "$control_verdict"; control_verdict_json=$REPLY
+    else
+        control_verdict_json=null
+    fi
+    (( control_performed )) && control_performed_json=true
+    (( body_limited )) && body_limited_json=true
+
+    printf '{"schema_version":1,"type":"target","target":%s,"verdict":%s,"detail":%s,"tor_attempts":%d,"tor_attempt_limit":%d,"clearnet_control":{"performed":%s,"verdict":%s},"tor_specific":%s,"body_limited":%s}\n' \
+        "$target_json" "$verdict_json" "$detail_json" "$attempts" "$MAX_CIRCUITS" \
+        "$control_performed_json" "$control_verdict_json" "$tor_specific_json" \
+        "$body_limited_json"
+}
+
+print_json_summary() {
+    local total=$1 tor_specific_findings=$2
+    printf '{"schema_version":1,"type":"summary","complete":true,"total":%d,"counts":{"PASS":%d,"CHALLENGE":%d,"RATELIMIT":%d,"FAIL":%d,"DROP":%d,"TIMEOUT":%d,"CERT":%d,"SOCKS":%d,"WARN":%d},"tor_specific_findings":%d}\n' \
+        "$total" "${counts[PASS]:-0}" "${counts[CHALLENGE]:-0}" \
+        "${counts[RATELIMIT]:-0}" "${counts[FAIL]:-0}" "${counts[DROP]:-0}" \
+        "${counts[TIMEOUT]:-0}" "${counts[CERT]:-0}" "${counts[SOCKS]:-0}" \
+        "${counts[WARN]:-0}" "$tor_specific_findings"
+}
+
 usage() {
-    print -r -- "Usage: ./check_tor.zsh <file_with_urls.txt>"
+    print -r -- "Usage: ./check_tor.zsh [--format text|jsonl] <file_with_urls.txt>"
     print -r -- "       ./check_tor.zsh --help"
     print -r -- ""
     print -r -- "Scan each nonblank, non-comment target through a local Tor proxy."
     print -r -- "Targets without a scheme, and http:// targets, are tested as https://."
     print -r -- ""
     print -r -- "Options:"
-    print -r -- "  -h, --help  Show this help and exit."
+    print -r -- "  --format text|jsonl  Select human text (default) or JSON Lines output."
+    print -r -- "  -h, --help           Show this help and exit."
     print -r -- ""
     print -r -- "Environment:"
     print -r -- "  NO_COLOR    Disable ANSI color styling."
@@ -149,29 +205,78 @@ probe() {
 }
 
 parse_args() {
-    REPLY=""
+    local output_format=text target_file="" argument
+    REPLY="" reply=()
     if (( $# == 1 )) && [[ "$1" == (-h|--help) ]]; then
         usage
         return 2
     fi
 
-    if (( $# != 1 )); then
+    while (( $# > 0 )); do
+        argument=$1
+        case $argument in
+            --format)
+                shift
+                if (( $# == 0 )); then
+                    print -u2 -r -- "Error: --format requires text or jsonl."
+                    return 1
+                fi
+                output_format=$1
+                ;;
+            --format=*) output_format=${argument#*=} ;;
+            --)
+                shift
+                while (( $# > 0 )); do
+                    if [[ -n "$target_file" ]]; then
+                        print -u2 -r -- "Error: expected exactly one target file."
+                        usage >&2
+                        return 1
+                    fi
+                    target_file=$1
+                    shift
+                done
+                break
+                ;;
+            -*)
+                print -u2 -r -- "Error: unknown option '$argument'."
+                usage >&2
+                return 1
+                ;;
+            *)
+                if [[ -n "$target_file" ]]; then
+                    print -u2 -r -- "Error: expected exactly one target file."
+                    usage >&2
+                    return 1
+                fi
+                target_file=$argument
+                ;;
+        esac
+        shift
+    done
+
+    if [[ "$output_format" != (text|jsonl) ]]; then
+        print -u2 -r -- "Error: unsupported format '$output_format'; expected text or jsonl."
+        return 1
+    fi
+
+    if [[ -z "$target_file" ]]; then
         print -u2 -r -- "Error: expected exactly one target file."
         usage >&2
         return 1
     fi
 
-    if [[ ! -f "$1" ]]; then
-        print -u2 -r -- "Error: file '$1' not found or is not a regular file."
+    if [[ ! -f "$target_file" ]]; then
+        print -u2 -r -- "Error: file '$target_file' not found or is not a regular file."
         return 1
     fi
 
-    if [[ ! -r "$1" ]]; then
-        print -u2 -r -- "Error: file '$1' is not readable."
+    if [[ ! -r "$target_file" ]]; then
+        print -u2 -r -- "Error: file '$target_file' is not readable."
         return 1
     fi
 
-    REPLY=$1
+    REPLY=$target_file
+    reply=("$target_file" "$output_format")
 }
 
 load_targets() {
@@ -226,15 +331,19 @@ warn_tracked_input() {
 tor_preflight() {
     local tor_check exit_ip
 
-    echo "${BLD}check_tor${OFF} · https://github.com/josephlhall/check_tor"
-    echo "Performing pre-flight check to ensure Tor is running..."
+    if [[ ${OUTPUT_FORMAT:-text} == text ]]; then
+        echo "${BLD}check_tor${OFF} · https://github.com/josephlhall/check_tor"
+        echo "Performing pre-flight check to ensure Tor is running..."
+    fi
     # This checks more than whether a SOCKS port accepts connections: Tor's service
     # confirms that the request emerged from its network and reports the exit IP.
     tor_check=$(curl -s --socks5-hostname "$TOR_PROXY" --max-time 10 https://check.torproject.org/api/ip)
 
     if [[ "$tor_check" == *'"IsTor":true'* ]]; then
         exit_ip=${tor_check#*\"IP\":\"} exit_ip=${exit_ip%%\"*}
-        echo "[${GRN}SUCCESS${OFF}] Tor connection verified (current exit: ${exit_ip:-unknown}). Starting scan..."
+        [[ ${OUTPUT_FORMAT:-text} == text ]] && \
+            echo "[${GRN}SUCCESS${OFF}] Tor connection verified (current exit: ${exit_ip:-unknown}). Starting scan..."
+        return 0
     else
         print -u2 -r -- "[${RED}ERROR${OFF}] Tor connection failed. Did you remember to run 'tor-on'?"
         return 1
@@ -243,7 +352,9 @@ tor_preflight() {
 
 scan_target() {
     local url=$1 i=$2 total=$3
-    local attempt tor_verdict tor_detail tor_specific
+    local attempt tor_verdict tor_detail tor_body_limited
+    local control_performed=0 control_verdict="" tor_specific_json=null
+    local summary_included=0
 
     # Auto-format: upgrade http:// to https://, or add https:// if missing.
     url=${url/#http:\/\//https:\/\/}
@@ -263,7 +374,7 @@ scan_target() {
     done
     # The clearnet control below calls classify again and overwrites its global
     # outputs, so preserve the final Tor result first.
-    tor_verdict=$verdict tor_detail=$detail
+    tor_verdict=$verdict tor_detail=$detail tor_body_limited=${probe_body_limited:-0}
 
     if (( attempt > 1 )); then
         if blocky "$tor_verdict"; then
@@ -276,21 +387,33 @@ scan_target() {
     # For persistent blocks, run a clearnet control request and compare how
     # much worse Tor fared. Equal or gentler treatment on clearnet means the
     # site is hostile to scripted clients generally, not to Tor.
-    tor_specific=1
     if blocky "$tor_verdict"; then
         transient "[$i/$total] $url — clearnet control check"
         probe "$url" "" $TIMEOUT_CLEARNET
         classify
+        control_performed=1 control_verdict=$verdict
         compare_treatment "$tor_verdict" "$tor_detail" "$verdict"
+        summary_included=$tor_specific
+        # compare_treatment deliberately keeps inconclusive controls in the
+        # human review list. Machine consumers need the stronger distinction:
+        # null means the control could not establish Tor specificity.
+        if [[ "$control_verdict" != (CERT|WARN) ]]; then
+            (( tor_specific )) && tor_specific_json=true || tor_specific_json=false
+        fi
     fi
 
-    print_line "$tor_verdict" "$url" "$tor_detail"
+    if [[ ${OUTPUT_FORMAT:-text} == jsonl ]]; then
+        print_json_target "$url" "$tor_verdict" "$tor_detail" "$attempt" \
+            "$control_performed" "$control_verdict" "$tor_specific_json" "$tor_body_limited"
+    else
+        print_line "$tor_verdict" "$url" "$tor_detail"
+    fi
 
-    # Return the values the scan aggregator needs without leaking per-target
-    # locals. REPLY is the verdict; reply contains normalized URL and the
-    # Tor-specific flag.
+    # Return the structured values the scan aggregator and future source-mode
+    # callers need without requiring them to parse either output format.
     REPLY=$tor_verdict
-    reply=("$url" "$tor_specific")
+    reply=("$url" "$tor_specific_json" "$tor_detail" "$attempt" \
+           "$control_performed" "$control_verdict" "$tor_body_limited" "$summary_included")
 }
 
 print_summary() {
@@ -315,9 +438,10 @@ print_summary() {
 run_scan() {
     local -a scan_targets=("$@") blocked=()
     local -A counts
-    local total=$# i verdict_key normalized_url tor_specific
+    local total=$# i verdict_key normalized_url tor_specific summary_included
+    local tor_specific_findings=0
 
-    echo "$RULE"
+    [[ ${OUTPUT_FORMAT:-text} == text ]] && echo "$RULE"
 
     # zsh arrays are one-indexed by default; keep this bound aligned with that
     # convention if target storage changes.
@@ -326,14 +450,20 @@ run_scan() {
         verdict_key=$REPLY
         normalized_url=${reply[1]}
         tor_specific=${reply[2]}
+        summary_included=${reply[8]}
 
         (( counts[$verdict_key]++ ))
-        if blocky "$verdict_key" && (( tor_specific )); then
+        [[ "$tor_specific" == true ]] && (( tor_specific_findings++ ))
+        if blocky "$verdict_key" && (( summary_included )); then
             blocked+=("$normalized_url ($verdict_key)")
         fi
     done
 
-    print_summary "$total"
+    if [[ ${OUTPUT_FORMAT:-text} == jsonl ]]; then
+        print_json_summary "$total" "$tor_specific_findings"
+    else
+        print_summary "$total"
+    fi
 }
 
 # The execution guard at the end of the file is the only automatic call to
@@ -341,7 +471,7 @@ run_scan() {
 # callers load the reusable definitions without starting a scan.
 main() {
     setopt localoptions localtraps
-    local parse_status target_file
+    local parse_status target_file OUTPUT_FORMAT
     local -a scan_targets
 
     configure_output
@@ -351,6 +481,7 @@ main() {
     (( parse_status == 2 )) && return 0
     (( parse_status == 0 )) || return "$parse_status"
     target_file=$REPLY
+    OUTPUT_FORMAT=${reply[2]}
 
     load_targets "$target_file" || return 1
     scan_targets=("${reply[@]}")

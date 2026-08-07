@@ -70,6 +70,12 @@ This script requires `zsh`, `curl`, and a local `tor` proxy to run.
    lines and comments is rejected before the scanner contacts Tor. Run
    `./check_tor.zsh --help` to see the command contract without starting Tor.
 
+   For automation, select JSON Lines explicitly:
+
+   ```zsh
+   ./check_tor.zsh --format jsonl ~/tor-targets/mylist.txt
+   ```
+
 4. **Stop the Tor proxy (when finished):**
    ```zsh
    tor-off
@@ -92,6 +98,33 @@ NO_COLOR=1 ./check_tor.zsh ~/tor-targets/mylist.txt
 Exit status `0` means the scan completed, even if it found blocked or degraded
 targets. Exit status `1` means the command could not complete because invocation,
 input, a required command, or the Tor preflight failed.
+
+### Machine-readable output
+
+`--format jsonl` writes one JSON object per target followed by one summary
+object. It emits no banner, transient progress, ANSI styling, or prose summary.
+Fatal errors remain on stderr and exit with status `1`; if scanning cannot
+begin, stdout is empty. Findings in a completed scan retain status `0`.
+
+Each object contains `"schema_version": 1` and a `type` of `target` or
+`summary`. Target records include:
+
+* `target`, `verdict`, and a human-readable `detail`
+* `tor_attempts` and `tor_attempt_limit`
+* `clearnet_control.performed` and its nullable `verdict`
+* nullable `tor_specific`, which is `true` or `false` only after a conclusive
+  clearnet comparison
+* `body_limited`, which distinguishes the response-body cutoff from other
+  `WARN` results
+
+The final summary has `complete: true`, the total, every verdict count, and the
+number of Tor-specific findings. Consumers should branch on structured fields,
+not parse `detail`. New optional fields may be added within schema version 1;
+removing a field or changing its meaning or type requires a new schema version.
+
+JSONL output contains the scanned targets and is sensitive operational data.
+Store it outside this repository with restrictive permissions; do not add it to
+Git or place it under a publicly accessible path.
 
 ## Testing
 
@@ -121,7 +154,7 @@ git diff --check
 ```
 
 A successful run reports `All 66 offline checks passed.` and
-`All 62 offline integration checks passed.` The **Offline tests** GitHub Actions
+`All 91 offline integration checks passed.` The **Offline tests** GitHub Actions
 workflow runs the same syntax and test commands on Ubuntu and macOS for every
 pull request and push to `main`; it can also be started manually.
 
