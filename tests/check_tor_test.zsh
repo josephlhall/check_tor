@@ -48,6 +48,7 @@ reset_probe() {
     probe_redirs=0
     probe_tls=0
     probe_timeout=30
+    probe_body_limited=0
     probe_final="https://example.test/"
     probe_err=""
     : > "$BODY"
@@ -85,6 +86,13 @@ assert_classify "timeout" 28 000 TIMEOUT
 assert_classify "connect failure" 7 000 TIMEOUT
 assert_classify "redirect loop" 47 000 WARN
 assert_classify "unexpected curl failure" 42 000 WARN
+
+reset_probe
+probe_exit=23 probe_code=403 probe_body_limited=1
+classify
+assert_contains "body cutoff detail" "1 MiB inspection limit" "$detail"
+blocky "$verdict"
+assert_eq "body cutoff is not blocky" 1 "$?"
 
 reset_probe
 probe_exit=28 probe_timeout=12 probe_tls=0

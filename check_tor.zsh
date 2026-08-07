@@ -33,6 +33,13 @@ TIMEOUT_FIRST=60      # first attempt over Tor
 TIMEOUT_RETRY=30      # retries on fresh circuits
 TIMEOUT_CLEARNET=20   # control request without Tor
 
+# Retain at most 1 MiB of each response body. WAF fingerprints are normally
+# near the start of an error page; accepting this finite prefix prevents an
+# untrusted or endless response from consuming disk until the time limit. A
+# fingerprint beyond the prefix can be missed, so reaching the cap is reported
+# as inconclusive rather than as evidence that the site blocks Tor.
+MAX_BODY_BYTES=$(( 1024 * 1024 ))
+
 # Browser-like headers reduce trivial bot-fingerprint differences, but they do
 # not make curl equivalent to Chrome: TLS and JavaScript behavior still differ.
 USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
@@ -115,12 +122,21 @@ probe() {
     # is suppressed because %{errormsg} captures it without mixing diagnostics
     # into scanner output. That field needs curl 7.75+; older curl leaves it
     # empty without shifting the preceding fields, so no version gate is needed.
-    out=$(curl -s -o "$BODY" -D "$HDRS" -L --max-redirs 10 \
+    # --max-filesize cannot enforce a limit when a server omits Content-Length.
+    # Put a byte-counting sink in front of the response file so chunked and
+    # endless bodies are bounded too. curl may then report a write error after
+    # head closes the pipe; probe_body_limited distinguishes that intentional
+    # cutoff from an unrelated destination failure.
+    out=$(curl -s -o >(head -c "$MAX_BODY_BYTES" > "$BODY") \
+        -D "$HDRS" -L --max-redirs 10 \
         -A "$USER_AGENT" -H "$ACCEPT_HDR" -H "$LANG_HDR" \
         "${via[@]}" --max-time "$3" \
         -w '%{http_code}\t%{num_redirects}\t%{time_appconnect}\t%{url_effective}\t%{errormsg}' \
         "$1" 2>/dev/null)
     probe_exit=$?
+    local body_bytes
+    body_bytes=$(wc -c < "$BODY")
+    probe_body_limited=$(( body_bytes >= MAX_BODY_BYTES ))
     IFS=$'\t' read -r probe_code probe_redirs probe_tls probe_final probe_err <<< "$out"
     probe_code=${probe_code:-000}
 
@@ -180,7 +196,7 @@ load_targets() {
 }
 
 check_dependencies() {
-    local -a required_commands=(curl awk grep head cut tr mktemp)
+    local -a required_commands=(curl awk grep head cut tr wc mktemp)
     local -a missing_commands=()
     local required_command
     for required_command in "${required_commands[@]}"; do
