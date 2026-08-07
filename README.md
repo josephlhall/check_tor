@@ -120,8 +120,8 @@ zsh tests/check_tor_integration_test.zsh
 git diff --check
 ```
 
-A successful run reports `All 64 offline checks passed.` and
-`All 56 offline integration checks passed.` The **Offline tests** GitHub Actions
+A successful run reports `All 66 offline checks passed.` and
+`All 62 offline integration checks passed.` The **Offline tests** GitHub Actions
 workflow runs the same syntax and test commands on Ubuntu and macOS for every
 pull request and push to `main`; it can also be started manually.
 
@@ -152,6 +152,9 @@ The script does more than fetch a status code:
 * **Multiple circuits before declaring a block.** A block-ish result (FAIL, CHALLENGE, RATE LIMIT, DROP, TIMEOUT, SOCKS ERROR) is retried on up to 3 fresh Tor circuits (via SOCKS credential isolation—no ControlPort needed). A site that fails on all 3 has a site-wide policy; a site that passes on retry was just rejecting one exit node's IP reputation, and is reported as PASS with a note.
 * **A clearnet control request, compared by severity.** A block that persists across every circuit is re-tested *without* Tor, and the two results are ranked by how badly each impedes a real user: served normally, passable with friction (a challenge a browser can solve), or impassable. A site is only reported as blocking Tor when Tor fares *strictly worse* than an ordinary client. This clears sites that are simply hostile to every scripted client, and it catches escalation—a site that challenges everyone but hard-blocks Tor is flagged as "escalated for Tor". If the control request itself fails uninformatively (broken origin, TLS error), the result is labelled inconclusive and kept in the summary for a manual look.
 * **Blocker fingerprinting.** Response headers and bodies are inspected to name the blocker: Cloudflare error codes (1020 firewall rule, 1015 rate limit, 1006/1007/1008 IP ban—these ride inside an HTTP 403, not on the status line), `cf-mitigated: challenge` (managed challenge), Akamai, Sucuri, and Imperva/Incapsula signatures.
+  Response-body inspection is limited to the first 1 MiB per probe. If a body
+  reaches that limit, the result is an inconclusive warning rather than block
+  evidence; a fingerprint appearing only later in the response may be missed.
 * **Summary.** The scan ends with per-verdict counts and a list of the domains where Tor was treated worse than an ordinary client.
 
 ## Output Legend

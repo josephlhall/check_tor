@@ -100,6 +100,9 @@ case $CHECK_TOR_FAKE_SCENARIO in
     persistent_tor_block)
         [[ -n "$proxy_user" ]] && code=403
         ;;
+    oversized_body)
+        code=403
+        ;;
     *)
         print -u2 -- "Unknown fake curl scenario: $CHECK_TOR_FAKE_SCENARIO"
         exit 2
@@ -107,7 +110,12 @@ case $CHECK_TOR_FAKE_SCENARIO in
 esac
 
 print -r -- "HTTP/2 $code" > "$header_file"
-if (( code == 403 )); then
+if [[ "$CHECK_TOR_FAKE_SCENARIO" == oversized_body ]]; then
+    # Write well beyond the scanner's cap. Its byte-counting output sink must
+    # stop this synthetic chunked/unknown-size response at the finite limit.
+    printf '%*s' 2097152 '' > "$body_file"
+    printf '%s\t0\t0.1\t%s\t\n' "$code" "$url"
+elif (( code == 403 )); then
     print -r -- "error code: 1020" > "$body_file"
 else
     : > "$body_file"
@@ -312,6 +320,21 @@ assert_contains "blocked summary count" "1 FAIL" "$scanner_stdout"
 assert_contains "blocked target list" "blocked.example.test (FAIL)" "$scanner_stdout"
 assert_eq "persistent probe count" 4 "$(< "$block_case/curl.state")"
 assert_eq "three Tor probes" 3 "$(grep -c -- '--proxy-user' "$block_case/curl.log")"
+
+# Crossing the response-body cap is an intentional, inconclusive cutoff. It
+# must not be retried, compared with clearnet, or reported as a Tor block.
+oversized_case="$TEST_TMP/oversized"
+mkdir "$oversized_case"
+print -r -- "oversized.example.test" > "$oversized_case/targets.txt"
+run_scanner oversized_body "$oversized_case/targets.txt" "$oversized_case"
+assert_eq "oversized response status" 0 "$scanner_status"
+assert_contains "oversized response verdict" "[WARNING]" "$scanner_stdout"
+assert_contains "oversized response detail" "1 MiB inspection limit" "$scanner_stdout"
+assert_eq "oversized response probe count" 1 "$(< "$oversized_case/curl.state")"
+assert_not_contains "oversized response blocked list" \
+    "Likely blocking or challenging Tor" "$scanner_stdout"
+assert_eq "oversized response temporary cleanup" 0 \
+    "$(find "$oversized_case/scanner-tmp" -type f | wc -l | tr -d ' ')"
 
 # Preflight failures preserve normal progress on stdout and diagnose the fatal
 # condition on stderr.

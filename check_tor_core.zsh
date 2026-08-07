@@ -33,6 +33,13 @@ blocker_id() {
 # Classify the last probe into a verdict + human detail.
 classify() {
     verdict="" detail=""
+    # A capped prefix is deliberately inconclusive even if curl also returned
+    # an HTTP status or write error. Treating partial content as authoritative
+    # could create a false block or trigger misleading Tor/clearnet retries.
+    if (( ${probe_body_limited:-0} )); then
+        verdict=WARN detail="response body reached the 1 MiB inspection limit"
+        return
+    fi
     case $probe_exit in
         5)     verdict=SOCKS; detail="couldn't resolve the SOCKS proxy — is Tor still running?"; return ;;
         97)
