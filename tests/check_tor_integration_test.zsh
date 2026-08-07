@@ -122,11 +122,14 @@ chmod +x "$FAKE_BIN/curl"
 source_case="$TEST_TMP/source"
 mkdir "$source_case" "$source_case/scanner-tmp"
 : > "$source_case/curl.log"
+print -r -- $'\n# source fixture\nalpha.example.test\r\n beta.example.test \n' > "$source_case/targets.txt"
 set +e
 CHECK_TOR_FAKE_SCENARIO=all_pass \
 CHECK_TOR_FAKE_STATE="$source_case/curl.state" \
 CHECK_TOR_FAKE_LOG="$source_case/curl.log" \
 CHECK_TOR_SOURCE_TRAP="$source_case/caller-trap" \
+CHECK_TOR_SOURCE_INPUT="$source_case/targets.txt" \
+CHECK_TOR_SOURCE_RESULT="$source_case/function-result" \
 TMPDIR="$source_case/scanner-tmp" \
 PATH="$FAKE_BIN:/usr/bin:/bin" \
     "$zsh_executable" -c '
@@ -137,7 +140,16 @@ PATH="$FAKE_BIN:/usr/bin:/bin" \
         source "$script_path"
         [[ $# == 2 && $1 == caller-argument && $2 == second-argument ]] || exit 10
         (( $+functions[configure_output] && $+functions[usage] &&
-           $+functions[probe] && $+functions[main] )) || exit 11
+           $+functions[parse_args] && $+functions[load_targets] &&
+           $+functions[check_dependencies] && $+functions[warn_tracked_input] &&
+           $+functions[probe] && $+functions[tor_preflight] &&
+           $+functions[scan_target] && $+functions[print_summary] &&
+           $+functions[run_scan] && $+functions[main] )) || exit 11
+        parse_args "$CHECK_TOR_SOURCE_INPUT" || exit 12
+        parsed_input=$REPLY
+        load_targets "$parsed_input" || exit 13
+        check_dependencies || exit 14
+        print -r -- "$parsed_input:${(j:,:)reply}" > "$CHECK_TOR_SOURCE_RESULT"
     ' zsh "$REPO_ROOT/check_tor.zsh" "$source_case" \
     > "$source_case/stdout" 2> "$source_case/stderr"
 source_status=$?
@@ -147,6 +159,9 @@ assert_eq "source stdout" "" "$(< "$source_case/stdout")"
 assert_eq "source stderr" "" "$(< "$source_case/stderr")"
 assert_eq "source preserves caller arguments and trap" \
     "2:caller-argument:second-argument" "$(< "$source_case/caller-trap")"
+assert_eq "source callable boundaries" \
+    "$source_case/targets.txt:alpha.example.test,beta.example.test" \
+    "$(< "$source_case/function-result")"
 assert_eq "source curl calls" "" "$(< "$source_case/curl.log")"
 assert_eq "source temporary files" 0 "$(find "$source_case/scanner-tmp" -type f | wc -l | tr -d ' ')"
 

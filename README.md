@@ -121,7 +121,7 @@ git diff --check
 ```
 
 A successful run reports `All 64 offline checks passed.` and
-`All 55 offline integration checks passed.` The **Offline tests** GitHub Actions
+`All 56 offline integration checks passed.` The **Offline tests** GitHub Actions
 workflow runs the same syntax and test commands on Ubuntu and macOS for every
 pull request and push to `main`; it can also be started manually.
 
