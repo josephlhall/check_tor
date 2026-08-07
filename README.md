@@ -73,16 +73,35 @@ This script requires `zsh`, `curl`, and a local `tor` proxy to run.
 
 ## Testing
 
-Run the deterministic offline regression suite with:
+All tests are deterministic and offline. They use synthetic `.example.test`
+targets and temporary files; they never inspect `targets.txt`, `scans/`, or
+`*.private.txt`. You do not need a running Tor proxy or Internet access.
+
+The repository has two complementary suites:
+
+* `tests/check_tor_test.zsh` exercises the decision logic directly, including
+  curl and HTTP classification, WAF fingerprints, retry eligibility, severity,
+  and Tor-versus-clearnet comparisons.
+* `tests/check_tor_integration_test.zsh` invokes `check_tor.zsh` as a user would.
+  It places a controlled fake `curl` first in `PATH` to test argument failures,
+  target parsing and normalization, circuit retries, clearnet controls, output
+  summaries, curl arguments, and temporary-file cleanup without reaching the
+  network.
+
+Run the complete local validation from the repository root:
 
 ```zsh
+test -x check_tor.zsh
+zsh -n check_tor.zsh check_tor_core.zsh tests/*.zsh
 zsh tests/check_tor_test.zsh
 zsh tests/check_tor_integration_test.zsh
+git diff --check
 ```
 
-The suites use synthetic responses and temporary files. The integration suite
-replaces `curl` with a controlled test double, so neither suite starts Tor,
-makes network requests, or uses operational target lists.
+A successful run reports `All 64 offline checks passed.` and
+`All 21 offline integration checks passed.` The **Offline tests** GitHub Actions
+workflow runs the same syntax and test commands on Ubuntu and macOS for every
+pull request and push to `main`; it can also be started manually.
 
 ## Handling target lists
 
