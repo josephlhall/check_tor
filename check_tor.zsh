@@ -132,18 +132,11 @@ probe() {
         "$HDRS" > "$LASTH"
 }
 
-# The execution guard at the end of the file is the only automatic call to
-# main. Keeping side effects here makes sourcing safe and lets tests or future
-# callers load the reusable definitions without starting a scan.
-main() {
-    setopt localoptions localtraps
-    configure_output
-
-    # ---------------------------------------------------------- arg parsing ---
-
+parse_args() {
+    REPLY=""
     if (( $# == 1 )) && [[ "$1" == (-h|--help) ]]; then
         usage
-        return 0
+        return 2
     fi
 
     if (( $# != 1 )); then
@@ -162,27 +155,34 @@ main() {
         return 1
     fi
 
+    REPLY=$1
+}
+
+load_targets() {
+    local input_file=$1 line
+    reply=()
     # Load and validate targets before checking dependencies or contacting Tor.
     # An input containing only whitespace and comments is operationally
     # equivalent to an empty file and is rejected rather than reported as a
     # successful scan.
-    targets=()
     while IFS= read -r line || [[ -n "$line" ]]; do
         line=${line//$'\r'/}
         line="${line#"${line%%[![:space:]]*}"}"
         line="${line%"${line##*[![:space:]]}"}"
         [[ -z "$line" || "$line" == \#* ]] && continue
-        targets+=("$line")
-    done < "$1"
-    total=${#targets[@]}
+        reply+=("$line")
+    done < "$input_file"
 
-    if (( total == 0 )); then
-        print -u2 -r -- "Error: file '$1' contains no targets."
+    if (( ${#reply[@]} == 0 )); then
+        print -u2 -r -- "Error: file '$input_file' contains no targets."
         return 1
     fi
+}
 
-    required_commands=(curl awk grep head cut tr mktemp)
-    missing_commands=()
+check_dependencies() {
+    local -a required_commands=(curl awk grep head cut tr mktemp)
+    local -a missing_commands=()
+    local required_command
     for required_command in "${required_commands[@]}"; do
         (( $+commands[$required_command] )) || missing_commands+=("$required_command")
     done
@@ -190,26 +190,25 @@ main() {
         print -u2 -r -- "Error: missing required command(s): ${(j:, :)missing_commands}"
         return 1
     fi
+}
 
+warn_tracked_input() {
+    local input_file=$1
     # A real target list names organizations that believe they are at risk and
     # are seeking protection they do not yet have. Published, it is a ready-made
     # reconnaissance aid. Warn loudly if this file is tracked by git.
     if (( $+commands[git] )) \
-       && git -C "${1:A:h}" rev-parse --is-inside-work-tree &>/dev/null \
-       && git -C "${1:A:h}" ls-files --error-unmatch "${1:A}" &>/dev/null; then
-        print -u2 -r -- "[${YEL}WARNING${OFF}] '$1' is tracked by git and may be published."
+       && git -C "${input_file:A:h}" rev-parse --is-inside-work-tree &>/dev/null \
+       && git -C "${input_file:A:h}" ls-files --error-unmatch "${input_file:A}" &>/dev/null; then
+        print -u2 -r -- "[${YEL}WARNING${OFF}] '$input_file' is tracked by git and may be published."
         print -u2 -r -- "            If these are real targets, untrack them and keep the list"
         print -u2 -r -- "            outside the repo. See 'Handling target lists' in README.md."
         print -u2 -r -- ""
     fi
+}
 
-    # Allocate response files only after all offline validation succeeds. With
-    # localtraps, cleanup runs when main returns and the caller's traps are
-    # restored if main was invoked from a sourced script.
-    BODY=$(mktemp) HDRS=$(mktemp) LASTH=$(mktemp)
-    trap 'rm -f "$BODY" "$HDRS" "$LASTH"' EXIT INT TERM
-
-    # ------------------------------------------------------------ pre-flight ---
+tor_preflight() {
+    local tor_check exit_ip
 
     echo "${BLD}check_tor${OFF} · https://github.com/josephlhall/check_tor"
     echo "Performing pre-flight check to ensure Tor is running..."
@@ -224,67 +223,65 @@ main() {
         print -u2 -r -- "[${RED}ERROR${OFF}] Tor connection failed. Did you remember to run 'tor-on'?"
         return 1
     fi
+}
 
-    # -------------------------------------------------------------- main scan ---
+scan_target() {
+    local url=$1 i=$2 total=$3
+    local attempt tor_verdict tor_detail tor_specific
 
-    echo "$RULE"
+    # Auto-format: upgrade http:// to https://, or add https:// if missing.
+    url=${url/#http:\/\//https:\/\/}
+    [[ "$url" =~ ^https?:// ]] || url="https://$url"
 
-    typeset -A counts
-    blocked=()
-
-    # zsh arrays are one-indexed by default; keep this bound aligned with that
-    # convention if target storage changes.
-    for (( i = 1; i <= total; i++ )); do
-        url=${targets[$i]}
-
-        # Auto-format: upgrade http:// to https://, or add https:// if missing.
-        url=${url/#http:\/\//https:\/\/}
-        [[ "$url" =~ ^https?:// ]] || url="https://$url"
-
-        # Retry only results for which another exit could plausibly change the
-        # outcome. Certificate errors and unknown failures instead remain visible
-        # for manual diagnosis without spending additional circuits.
-        attempt=1
-        while true; do
-            transient "[$i/$total] $url — Tor circuit $attempt/$MAX_CIRCUITS"
-            probe "$url" "c${RANDOM}x${RANDOM}" $(( attempt == 1 ? TIMEOUT_FIRST : TIMEOUT_RETRY ))
-            classify
-            blocky "$verdict" || break
-            (( attempt == MAX_CIRCUITS )) && break
-            (( attempt++ ))
-        done
-        # The clearnet control below calls classify again and overwrites its global
-        # outputs, so preserve the final Tor result first.
-        tor_verdict=$verdict tor_detail=$detail
-
-        if (( attempt > 1 )); then
-            if blocky "$tor_verdict"; then
-                tor_detail+=", on $MAX_CIRCUITS different circuits"
-            else
-                tor_detail+=" (blocked on $(( attempt - 1 )) of $MAX_CIRCUITS circuits — circuit-dependent, not site-wide)"
-            fi
-        fi
-
-        # For persistent blocks, run a clearnet control request and compare how
-        # much worse Tor fared. Equal or gentler treatment on clearnet means the
-        # site is hostile to scripted clients generally, not to Tor.
-        tor_specific=1
-        if blocky "$tor_verdict"; then
-            transient "[$i/$total] $url — clearnet control check"
-            probe "$url" "" $TIMEOUT_CLEARNET
-            classify
-            compare_treatment "$tor_verdict" "$tor_detail" "$verdict"
-        fi
-
-        print_line "$tor_verdict" "$url" "$tor_detail"
-        (( counts[$tor_verdict]++ ))
-        if blocky "$tor_verdict" && (( tor_specific )); then
-            blocked+=("$url ($tor_verdict)")
-        fi
+    # Retry only results for which another exit could plausibly change the
+    # outcome. Certificate errors and unknown failures instead remain visible
+    # for manual diagnosis without spending additional circuits.
+    attempt=1
+    while true; do
+        transient "[$i/$total] $url — Tor circuit $attempt/$MAX_CIRCUITS"
+        probe "$url" "c${RANDOM}x${RANDOM}" $(( attempt == 1 ? TIMEOUT_FIRST : TIMEOUT_RETRY ))
+        classify
+        blocky "$verdict" || break
+        (( attempt == MAX_CIRCUITS )) && break
+        (( attempt++ ))
     done
+    # The clearnet control below calls classify again and overwrites its global
+    # outputs, so preserve the final Tor result first.
+    tor_verdict=$verdict tor_detail=$detail
 
-    # ---------------------------------------------------------------- summary ---
+    if (( attempt > 1 )); then
+        if blocky "$tor_verdict"; then
+            tor_detail+=", on $MAX_CIRCUITS different circuits"
+        else
+            tor_detail+=" (blocked on $(( attempt - 1 )) of $MAX_CIRCUITS circuits — circuit-dependent, not site-wide)"
+        fi
+    fi
 
+    # For persistent blocks, run a clearnet control request and compare how
+    # much worse Tor fared. Equal or gentler treatment on clearnet means the
+    # site is hostile to scripted clients generally, not to Tor.
+    tor_specific=1
+    if blocky "$tor_verdict"; then
+        transient "[$i/$total] $url — clearnet control check"
+        probe "$url" "" $TIMEOUT_CLEARNET
+        classify
+        compare_treatment "$tor_verdict" "$tor_detail" "$verdict"
+    fi
+
+    print_line "$tor_verdict" "$url" "$tor_detail"
+
+    # Return the values the scan aggregator needs without leaking per-target
+    # locals. REPLY is the verdict; reply contains normalized URL and the
+    # Tor-specific flag.
+    REPLY=$tor_verdict
+    reply=("$url" "$tor_specific")
+}
+
+print_summary() {
+    local total=$1 key color b summary
+
+    # zsh functions are dynamically scoped: counts and blocked are locals in
+    # run_scan and visible here only for the duration of that call.
     echo "$RULE"
     summary="Scanned $total domain(s):"
     for key color in PASS "$GRN" CHALLENGE "$CYN" RATELIMIT "$YEL" FAIL "$RED" \
@@ -297,6 +294,62 @@ main() {
         for b in "${blocked[@]}"; do echo "  • $b"; done
     fi
     echo "Scan complete."
+}
+
+run_scan() {
+    local -a scan_targets=("$@") blocked=()
+    local -A counts
+    local total=$# i verdict_key normalized_url tor_specific
+
+    echo "$RULE"
+
+    # zsh arrays are one-indexed by default; keep this bound aligned with that
+    # convention if target storage changes.
+    for (( i = 1; i <= total; i++ )); do
+        scan_target "${scan_targets[$i]}" "$i" "$total"
+        verdict_key=$REPLY
+        normalized_url=${reply[1]}
+        tor_specific=${reply[2]}
+
+        (( counts[$verdict_key]++ ))
+        if blocky "$verdict_key" && (( tor_specific )); then
+            blocked+=("$normalized_url ($verdict_key)")
+        fi
+    done
+
+    print_summary "$total"
+}
+
+# The execution guard at the end of the file is the only automatic call to
+# main. Keeping side effects here makes sourcing safe and lets tests or future
+# callers load the reusable definitions without starting a scan.
+main() {
+    setopt localoptions localtraps
+    local parse_status target_file
+    local -a scan_targets
+
+    configure_output
+
+    parse_args "$@"
+    parse_status=$?
+    (( parse_status == 2 )) && return 0
+    (( parse_status == 0 )) || return "$parse_status"
+    target_file=$REPLY
+
+    load_targets "$target_file" || return 1
+    scan_targets=("${reply[@]}")
+
+    check_dependencies || return 1
+    warn_tracked_input "$target_file"
+
+    # Allocate response files only after all offline validation succeeds. With
+    # localtraps, cleanup runs when main returns and the caller's traps are
+    # restored if main was invoked from a sourced script.
+    BODY=$(mktemp) HDRS=$(mktemp) LASTH=$(mktemp)
+    trap 'rm -f "$BODY" "$HDRS" "$LASTH"' EXIT INT TERM
+
+    tor_preflight || return 1
+    run_scan "${scan_targets[@]}"
 }
 
 # ZSH_EVAL_CONTEXT is exactly "toplevel" for an executed script and includes
