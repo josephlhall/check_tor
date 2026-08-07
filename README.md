@@ -66,10 +66,32 @@ This script requires `zsh`, `curl`, and a local `tor` proxy to run.
    ./check_tor.zsh ~/tor-targets/mylist.txt
    ```
 
+   Exactly one readable target file is required. A file containing only blank
+   lines and comments is rejected before the scanner contacts Tor. Run
+   `./check_tor.zsh --help` to see the command contract without starting Tor.
+
 4. **Stop the Tor proxy (when finished):**
    ```zsh
    tor-off
    ```
+
+### Output, color, and exit status
+
+Scan results and progress are written to stdout. Invocation, input, dependency,
+and Tor preflight failures are written to stderr. This allows redirected output
+to contain scan results without mixing in fatal diagnostics.
+
+Color is enabled when stdout is an interactive terminal. Redirected output is
+plain text. Set [`NO_COLOR`](https://no-color.org/) to any value to disable
+color explicitly:
+
+```zsh
+NO_COLOR=1 ./check_tor.zsh ~/tor-targets/mylist.txt
+```
+
+Exit status `0` means the scan completed, even if it found blocked or degraded
+targets. Exit status `1` means the command could not complete because invocation,
+input, a required command, or the Tor preflight failed.
 
 ## Testing
 
@@ -99,7 +121,7 @@ git diff --check
 ```
 
 A successful run reports `All 64 offline checks passed.` and
-`All 21 offline integration checks passed.` The **Offline tests** GitHub Actions
+`All 45 offline integration checks passed.` The **Offline tests** GitHub Actions
 workflow runs the same syntax and test commands on Ubuntu and macOS for every
 pull request and push to `main`; it can also be started manually.
 
