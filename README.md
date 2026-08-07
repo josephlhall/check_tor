@@ -77,10 +77,12 @@ Run the deterministic offline regression suite with:
 
 ```zsh
 zsh tests/check_tor_test.zsh
+zsh tests/check_tor_integration_test.zsh
 ```
 
-The suite uses synthetic responses and temporary files. It does not start Tor,
-make network requests, or use operational target lists.
+The suites use synthetic responses and temporary files. The integration suite
+replaces `curl` with a controlled test double, so neither suite starts Tor,
+makes network requests, or uses operational target lists.
 
 ## Handling target lists
 
