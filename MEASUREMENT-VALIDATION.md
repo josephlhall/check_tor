@@ -171,7 +171,11 @@ Tasks:
 - Separate direct observations from inferences.
 - Identify wording that implies more about human usability than the scanner observes.
 - Record the exact tool version and default settings to be validated.
-- Decide whether the study evaluates the current defaults or a fixed explicit configuration after issue #15 is complete.
+- Decide whether the study evaluates the current defaults or a fixed explicit
+  configuration. The scanner defaults to `localhost:9050`, three Tor attempts,
+  first/retry/clearnet timeouts of 60/30/20 seconds, and an enabled clearnet
+  control. The corresponding command-line settings may be frozen explicitly;
+  the HTTP request profile and 1 MiB response inspection cap remain fixed.
 
 **Output:** a one-page measurement contract and a frozen pilot protocol.
 
@@ -329,13 +333,12 @@ A possible local layout is:
 
 That directory should remain outside the Git repository. If any local study-output directory is created inside the checkout for convenience, add it to `.gitignore` before collecting data.
 
-## First steps after issues #15 and #10
+## First steps after the bounded implementation work
 
 The first milestone should be deliberately small.
 
 ### Step 1: Freeze the instrument
 
-- Finish the two bounded open issues.
 - Record the release, commit SHA, default settings, and supported override settings.
 - Run the complete offline test suite and CI.
 - Avoid unrelated scanner changes during the pilot.

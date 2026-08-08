@@ -151,6 +151,7 @@ PATH="$FAKE_BIN:/usr/bin:/bin" \
         source "$script_path"
         [[ $# == 2 && $1 == caller-argument && $2 == second-argument ]] || exit 10
         (( $+functions[configure_output] && $+functions[usage] &&
+           $+functions[parse_bounded_integer] && $+functions[validate_proxy] &&
            $+functions[parse_args] && $+functions[load_targets] &&
            $+functions[check_dependencies] && $+functions[warn_tracked_input] &&
            $+functions[json_quote] && $+functions[print_json_target] &&
@@ -159,12 +160,12 @@ PATH="$FAKE_BIN:/usr/bin:/bin" \
            $+functions[run_scan] && $+functions[main] )) || exit 11
         parse_args --format jsonl "$CHECK_TOR_SOURCE_INPUT" || exit 12
         parsed_input=$REPLY
-        parsed_format=${reply[2]}
+        parsed_settings="${(j:,:)reply[2,-1]}"
         json_quote $'"'"'quote" slash\\ tab\t line\n'"'"'
         quoted_value=$REPLY
         load_targets "$parsed_input" || exit 13
         check_dependencies || exit 14
-        print -r -- "$parsed_input:$parsed_format:$quoted_value:${(j:,:)reply}" > "$CHECK_TOR_SOURCE_RESULT"
+        print -r -- "$parsed_input:$parsed_settings:$quoted_value:${(j:,:)reply}" > "$CHECK_TOR_SOURCE_RESULT"
     ' zsh "$REPO_ROOT/check_tor.zsh" "$source_case" \
     > "$source_case/stdout" 2> "$source_case/stderr"
 source_status=$?
@@ -175,7 +176,7 @@ assert_eq "source stderr" "" "$(< "$source_case/stderr")"
 assert_eq "source preserves caller arguments and trap" \
     "2:caller-argument:second-argument" "$(< "$source_case/caller-trap")"
 assert_eq "source callable boundaries" \
-    "$source_case/targets.txt:jsonl:\"quote\\\" slash\\\\ tab\\u0009 line\\u000a\":alpha.example.test,beta.example.test" \
+    "$source_case/targets.txt:jsonl,localhost:9050,3,60,30,20,1:\"quote\\\" slash\\\\ tab\\u0009 line\\u000a\":alpha.example.test,beta.example.test" \
     "$(< "$source_case/function-result")"
 assert_eq "source curl calls" "" "$(< "$source_case/curl.log")"
 assert_eq "source temporary files" 0 "$(find "$source_case/scanner-tmp" -type f | wc -l | tr -d ' ')"
@@ -211,8 +212,10 @@ assert_eq "sourced main temporary cleanup" 0 "$(find "$sourced_main_case/scanner
 # empty directory proves its EXIT trap removed every file it created.
 run_scanner() {
     local scenario=$1 input=$2 case_dir=$3 output_format=${4:-default}
+    shift $(( $# < 4 ? $# : 4 ))
     local -a scanner_args=("$input")
     [[ "$output_format" != default ]] && scanner_args=(--format "$output_format" "$input")
+    (( $# > 0 )) && scanner_args=("$@" "${scanner_args[@]}")
     mkdir -p "$case_dir/scanner-tmp"
     : > "$case_dir/curl.log"
     set +e
@@ -254,6 +257,8 @@ assert_eq "help status" 0 "$help_status"
 assert_contains "help usage" "Usage:" "$(< "$cli_case/help.out")"
 assert_contains "help documents NO_COLOR" "NO_COLOR" "$(< "$cli_case/help.out")"
 assert_contains "help documents JSONL format" "--format text|jsonl" "$(< "$cli_case/help.out")"
+assert_contains "help documents proxy setting" "--proxy HOST:PORT" "$(< "$cli_case/help.out")"
+assert_contains "help documents no-clearnet setting" "--no-clearnet" "$(< "$cli_case/help.out")"
 assert_eq "help stderr" "" "$(< "$cli_case/help.err")"
 assert_eq "missing argument status" 1 "$missing_status"
 assert_eq "missing argument stdout" "" "$(< "$cli_case/missing.out")"
@@ -267,6 +272,32 @@ assert_eq "invalid format status" 1 "$format_status"
 assert_eq "invalid format stdout" "" "$(< "$cli_case/format.out")"
 assert_contains "invalid format diagnostic" "unsupported format 'xml'" "$(< "$cli_case/format.err")"
 assert_eq "invalid invocation curl calls" "" "$(< "$cli_case/curl.log")"
+
+# Invalid settings are rejected before the target file or network is touched.
+for invalid_setting in \
+    '--proxy=http://localhost:9050' \
+    '--proxy=localhost:0' \
+    '--proxy=localhost:65536' \
+    '--circuits=0' \
+    '--circuits=101' \
+    '--circuits=three' \
+    '--timeout-first=0' \
+    '--timeout-retry=3601' \
+    '--timeout-clearnet=slow'
+do
+    setting_name=${invalid_setting%%=*}
+    setting_value=${invalid_setting#*=}
+    set +e
+    CHECK_TOR_FAKE_LOG="$cli_case/curl.log" PATH="$FAKE_BIN:/usr/bin:/bin" \
+        "$REPO_ROOT/check_tor.zsh" "$invalid_setting" "$TEST_TMP/absent.txt" \
+        > "$cli_case/setting.out" 2> "$cli_case/setting.err"
+    setting_status=$?
+    set -e
+    assert_eq "invalid $setting_name value $setting_value status" 1 "$setting_status"
+    assert_contains "invalid $setting_name value $setting_value diagnostic" \
+        "$setting_name" "$(< "$cli_case/setting.err")"
+done
+assert_eq "invalid settings curl calls" "" "$(< "$cli_case/curl.log")"
 
 # Empty and comment-only files are rejected before dependency or Tor checks.
 empty_case="$TEST_TMP/empty"
@@ -327,7 +358,7 @@ json_case="$TEST_TMP/json"
 mkdir "$json_case"
 print -r -- "json.example.test" > "$json_case/targets.txt"
 run_scanner all_pass "$json_case/targets.txt" "$json_case" jsonl
-json_target='{"schema_version":1,"type":"target","target":"https://json.example.test","verdict":"PASS","detail":"HTTP 200","tor_attempts":1,"tor_attempt_limit":3,"clearnet_control":{"performed":false,"verdict":null},"tor_specific":null,"body_limited":false}'
+json_target='{"schema_version":1,"type":"target","target":"https://json.example.test","verdict":"PASS","detail":"HTTP 200","tor_attempts":1,"tor_attempt_limit":3,"clearnet_control":{"enabled":true,"performed":false,"verdict":null},"tor_specific":null,"body_limited":false}'
 json_summary='{"schema_version":1,"type":"summary","complete":true,"total":1,"counts":{"PASS":1,"CHALLENGE":0,"RATELIMIT":0,"FAIL":0,"DROP":0,"TIMEOUT":0,"CERT":0,"SOCKS":0,"WARN":0},"tor_specific_findings":0}'
 assert_eq "JSONL scan status" 0 "$scanner_status"
 assert_eq "JSONL stderr" "" "$scanner_stderr"
@@ -370,7 +401,7 @@ print -r -- "json-blocked.example.test" > "$json_block_case/targets.txt"
 run_scanner persistent_tor_block "$json_block_case/targets.txt" "$json_block_case" jsonl
 assert_contains "JSONL retry count" '"tor_attempts":3' "$scanner_stdout"
 assert_contains "JSONL control verdict" \
-    '"clearnet_control":{"performed":true,"verdict":"PASS"}' "$scanner_stdout"
+    '"clearnet_control":{"enabled":true,"performed":true,"verdict":"PASS"}' "$scanner_stdout"
 assert_contains "JSONL Tor-specific result" '"tor_specific":true' "$scanner_stdout"
 assert_contains "JSONL Tor-specific summary" '"tor_specific_findings":1' "$scanner_stdout"
 
@@ -379,10 +410,47 @@ mkdir "$json_inconclusive_case"
 print -r -- "json-inconclusive.example.test" > "$json_inconclusive_case/targets.txt"
 run_scanner inconclusive_control "$json_inconclusive_case/targets.txt" "$json_inconclusive_case" jsonl
 assert_contains "JSONL inconclusive control verdict" \
-    '"clearnet_control":{"performed":true,"verdict":"WARN"}' "$scanner_stdout"
+    '"clearnet_control":{"enabled":true,"performed":true,"verdict":"WARN"}' "$scanner_stdout"
 assert_contains "JSONL inconclusive Tor specificity" '"tor_specific":null' "$scanner_stdout"
 assert_contains "JSONL inconclusive summary count" '"tor_specific_findings":0' "$scanner_stdout"
 assert_eq "JSONL inconclusive probe count" 4 "$(< "$json_inconclusive_case/curl.state")"
+
+# Explicit settings flow to the relevant curl calls and structured output.
+configured_case="$TEST_TMP/configured"
+mkdir "$configured_case"
+print -r -- "configured.example.test" > "$configured_case/targets.txt"
+run_scanner persistent_tor_block "$configured_case/targets.txt" "$configured_case" jsonl \
+    --proxy proxy.example.test:19050 --circuits 2 --timeout-first=11 \
+    --timeout-retry 12 --timeout-clearnet=13
+assert_eq "configured scan status" 0 "$scanner_status"
+assert_contains "configured attempt limit" '"tor_attempt_limit":2' "$scanner_stdout"
+assert_contains "configured control remains enabled" \
+    '"clearnet_control":{"enabled":true,"performed":true,"verdict":"PASS"}' "$scanner_stdout"
+assert_eq "configured probe count" 3 "$(< "$configured_case/curl.state")"
+assert_eq "configured proxy reaches preflight and Tor probes" 3 \
+    "$(grep -c -- '--socks5-hostname proxy.example.test:19050' "$configured_case/curl.log")"
+assert_eq "configured first timeout" 1 "$(grep -c -- '--max-time 11' "$configured_case/curl.log")"
+assert_eq "configured retry timeout" 1 "$(grep -c -- '--max-time 12' "$configured_case/curl.log")"
+assert_eq "configured control timeout" 1 "$(grep -c -- '--max-time 13' "$configured_case/curl.log")"
+
+# Disabling clearnet leaves a persistent automated-Tor block observable, but
+# deliberately withholds the Tor-specific inference that needs a control.
+no_clearnet_case="$TEST_TMP/no-clearnet"
+mkdir "$no_clearnet_case"
+print -r -- "no-clearnet.example.test" > "$no_clearnet_case/targets.txt"
+run_scanner persistent_tor_block "$no_clearnet_case/targets.txt" "$no_clearnet_case" jsonl \
+    --circuits=2 --no-clearnet
+assert_eq "no-clearnet scan status" 0 "$scanner_status"
+assert_contains "no-clearnet attempt limit" '"tor_attempt_limit":2' "$scanner_stdout"
+assert_contains "no-clearnet detail" "clearnet control disabled" "$scanner_stdout"
+assert_contains "no-clearnet control state" \
+    '"clearnet_control":{"enabled":false,"performed":false,"verdict":null}' "$scanner_stdout"
+assert_contains "no-clearnet specificity unknown" '"tor_specific":null' "$scanner_stdout"
+assert_contains "no-clearnet summary has no inferred finding" \
+    '"tor_specific_findings":0' "$scanner_stdout"
+assert_eq "no-clearnet probe count" 2 "$(< "$no_clearnet_case/curl.state")"
+assert_eq "no-clearnet uses Tor for every target probe" 2 \
+    "$(grep -c -- '--proxy-user' "$no_clearnet_case/curl.log")"
 
 # Crossing the response-body cap is an intentional, inconclusive cutoff. It
 # must not be retried, compared with clearnet, or reported as a Tor block.
@@ -406,7 +474,7 @@ run_scanner oversized_body "$json_oversized_case/targets.txt" "$json_oversized_c
 assert_contains "JSONL body cutoff verdict" '"verdict":"WARN"' "$scanner_stdout"
 assert_contains "JSONL explicit body cutoff" '"body_limited":true' "$scanner_stdout"
 assert_contains "JSONL cutoff has no control" \
-    '"clearnet_control":{"performed":false,"verdict":null}' "$scanner_stdout"
+    '"clearnet_control":{"enabled":true,"performed":false,"verdict":null}' "$scanner_stdout"
 assert_contains "JSONL cutoff is not Tor-specific" '"tor_specific":null' "$scanner_stdout"
 
 # Preflight failures preserve normal progress on stdout and diagnose the fatal

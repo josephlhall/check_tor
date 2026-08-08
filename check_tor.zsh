@@ -32,6 +32,7 @@ MAX_CIRCUITS=3
 TIMEOUT_FIRST=60      # first attempt over Tor
 TIMEOUT_RETRY=30      # retries on fresh circuits
 TIMEOUT_CLEARNET=20   # control request without Tor
+CLEARNET_ENABLED=1
 
 # Retain at most 1 MiB of each response body. WAF fingerprints are normally
 # near the start of an error page; accepting this finite prefix prevents an
@@ -111,7 +112,7 @@ print_json_target() {
     local target=$1 verdict_key=$2 result_detail=$3 attempts=$4
     local control_performed=$5 control_verdict=$6 tor_specific_json=$7 body_limited=$8
     local target_json verdict_json detail_json control_verdict_json
-    local control_performed_json=false body_limited_json=false
+    local control_enabled_json=false control_performed_json=false body_limited_json=false
 
     json_quote "$target"; target_json=$REPLY
     json_quote "$verdict_key"; verdict_json=$REPLY
@@ -121,13 +122,14 @@ print_json_target() {
     else
         control_verdict_json=null
     fi
+    (( CLEARNET_ENABLED )) && control_enabled_json=true
     (( control_performed )) && control_performed_json=true
     (( body_limited )) && body_limited_json=true
 
-    printf '{"schema_version":1,"type":"target","target":%s,"verdict":%s,"detail":%s,"tor_attempts":%d,"tor_attempt_limit":%d,"clearnet_control":{"performed":%s,"verdict":%s},"tor_specific":%s,"body_limited":%s}\n' \
+    printf '{"schema_version":1,"type":"target","target":%s,"verdict":%s,"detail":%s,"tor_attempts":%d,"tor_attempt_limit":%d,"clearnet_control":{"enabled":%s,"performed":%s,"verdict":%s},"tor_specific":%s,"body_limited":%s}\n' \
         "$target_json" "$verdict_json" "$detail_json" "$attempts" "$MAX_CIRCUITS" \
-        "$control_performed_json" "$control_verdict_json" "$tor_specific_json" \
-        "$body_limited_json"
+        "$control_enabled_json" "$control_performed_json" "$control_verdict_json" \
+        "$tor_specific_json" "$body_limited_json"
 }
 
 print_json_summary() {
@@ -140,15 +142,21 @@ print_json_summary() {
 }
 
 usage() {
-    print -r -- "Usage: ./check_tor.zsh [--format text|jsonl] <file_with_urls.txt>"
+    print -r -- "Usage: ./check_tor.zsh [options] <file_with_urls.txt>"
     print -r -- "       ./check_tor.zsh --help"
     print -r -- ""
     print -r -- "Scan each nonblank, non-comment target through a local Tor proxy."
     print -r -- "Targets without a scheme, and http:// targets, are tested as https://."
     print -r -- ""
     print -r -- "Options:"
-    print -r -- "  --format text|jsonl  Select human text (default) or JSON Lines output."
-    print -r -- "  -h, --help           Show this help and exit."
+    print -r -- "  --format text|jsonl       Select human text (default) or JSON Lines output."
+    print -r -- "  --proxy HOST:PORT         Tor SOCKS proxy (default: localhost:9050)."
+    print -r -- "  --circuits COUNT          Maximum Tor attempts, 1–100 (default: 3)."
+    print -r -- "  --timeout-first SECONDS   First Tor attempt, 1–3600 (default: 60)."
+    print -r -- "  --timeout-retry SECONDS   Later Tor attempts, 1–3600 (default: 30)."
+    print -r -- "  --timeout-clearnet SECONDS  Clearnet control, 1–3600 (default: 20)."
+    print -r -- "  --no-clearnet             Skip the clearnet control comparison."
+    print -r -- "  -h, --help                Show this help and exit."
     print -r -- ""
     print -r -- "Environment:"
     print -r -- "  NO_COLOR    Disable ANSI color styling."
@@ -156,6 +164,53 @@ usage() {
     print -r -- "Exit status:"
     print -r -- "  0  Scan completed, regardless of findings."
     print -r -- "  1  Invocation, input, dependency, or Tor preflight failure."
+}
+
+parse_bounded_integer() {
+    local value=$1 option_name=$2 maximum=$3
+    if [[ "$value" != <-> ]] || (( ${#value} > 9 )); then
+        print -u2 -r -- "Error: $option_name requires a positive integer no greater than $maximum."
+        return 1
+    fi
+    value=$(( 10#$value ))
+    if (( value < 1 || value > maximum )); then
+        print -u2 -r -- "Error: $option_name requires a positive integer no greater than $maximum."
+        return 1
+    fi
+    REPLY=$value
+}
+
+validate_proxy() {
+    local value=$1 host port normalized_host
+    if [[ -z "$value" || "$value" == *[[:space:]@/]* ]]; then
+        print -u2 -r -- "Error: --proxy requires HOST:PORT without a URL scheme or credentials."
+        return 1
+    fi
+
+    if [[ "$value" == \[*\]:* ]]; then
+        host=${value%%]:*}
+        host=${host#\[}
+        port=${value##*]:}
+        [[ -n "$host" && "$host" == *:* ]] || {
+            print -u2 -r -- "Error: --proxy requires HOST:PORT without a URL scheme or credentials."
+            return 1
+        }
+        normalized_host="[$host]"
+    elif [[ "$value" == *:* && "${value%:*}" != *:* ]]; then
+        host=${value%:*}
+        port=${value##*:}
+        [[ -n "$host" ]] || {
+            print -u2 -r -- "Error: --proxy requires HOST:PORT without a URL scheme or credentials."
+            return 1
+        }
+        normalized_host=$host
+    else
+        print -u2 -r -- "Error: --proxy requires HOST:PORT without a URL scheme or credentials."
+        return 1
+    fi
+
+    parse_bounded_integer "$port" "--proxy port" 65535 || return 1
+    REPLY="$normalized_host:$REPLY"
 }
 
 # ----------------------------------------------------------------- probes ---
@@ -206,6 +261,9 @@ probe() {
 
 parse_args() {
     local output_format=text target_file="" argument
+    local proxy=$TOR_PROXY circuits=$MAX_CIRCUITS
+    local timeout_first=$TIMEOUT_FIRST timeout_retry=$TIMEOUT_RETRY
+    local timeout_clearnet=$TIMEOUT_CLEARNET clearnet_enabled=$CLEARNET_ENABLED
     REPLY="" reply=()
     if (( $# == 1 )) && [[ "$1" == (-h|--help) ]]; then
         usage
@@ -224,6 +282,62 @@ parse_args() {
                 output_format=$1
                 ;;
             --format=*) output_format=${argument#*=} ;;
+            --proxy|--circuits|--timeout-first|--timeout-retry|--timeout-clearnet)
+                local option_name=$argument
+                shift
+                if (( $# == 0 )); then
+                    print -u2 -r -- "Error: $option_name requires a value."
+                    return 1
+                fi
+                case $option_name in
+                    --proxy)
+                        validate_proxy "$1" || return 1
+                        proxy=$REPLY
+                        ;;
+                    --circuits)
+                        parse_bounded_integer "$1" "$option_name" 100 || return 1
+                        circuits=$REPLY
+                        ;;
+                    --timeout-first)
+                        parse_bounded_integer "$1" "$option_name" 3600 || return 1
+                        timeout_first=$REPLY
+                        ;;
+                    --timeout-retry)
+                        parse_bounded_integer "$1" "$option_name" 3600 || return 1
+                        timeout_retry=$REPLY
+                        ;;
+                    --timeout-clearnet)
+                        parse_bounded_integer "$1" "$option_name" 3600 || return 1
+                        timeout_clearnet=$REPLY
+                        ;;
+                esac
+                ;;
+            --proxy=*|--circuits=*|--timeout-first=*|--timeout-retry=*|--timeout-clearnet=*)
+                local option_name=${argument%%=*} option_value=${argument#*=}
+                case $option_name in
+                    --proxy)
+                        validate_proxy "$option_value" || return 1
+                        proxy=$REPLY
+                        ;;
+                    --circuits)
+                        parse_bounded_integer "$option_value" "$option_name" 100 || return 1
+                        circuits=$REPLY
+                        ;;
+                    --timeout-first)
+                        parse_bounded_integer "$option_value" "$option_name" 3600 || return 1
+                        timeout_first=$REPLY
+                        ;;
+                    --timeout-retry)
+                        parse_bounded_integer "$option_value" "$option_name" 3600 || return 1
+                        timeout_retry=$REPLY
+                        ;;
+                    --timeout-clearnet)
+                        parse_bounded_integer "$option_value" "$option_name" 3600 || return 1
+                        timeout_clearnet=$REPLY
+                        ;;
+                esac
+                ;;
+            --no-clearnet) clearnet_enabled=0 ;;
             --)
                 shift
                 while (( $# > 0 )); do
@@ -276,7 +390,8 @@ parse_args() {
     fi
 
     REPLY=$target_file
-    reply=("$target_file" "$output_format")
+    reply=("$target_file" "$output_format" "$proxy" "$circuits" \
+           "$timeout_first" "$timeout_retry" "$timeout_clearnet" "$clearnet_enabled")
 }
 
 load_targets() {
@@ -387,7 +502,7 @@ scan_target() {
     # For persistent blocks, run a clearnet control request and compare how
     # much worse Tor fared. Equal or gentler treatment on clearnet means the
     # site is hostile to scripted clients generally, not to Tor.
-    if blocky "$tor_verdict"; then
+    if blocky "$tor_verdict" && (( CLEARNET_ENABLED )); then
         transient "[$i/$total] $url — clearnet control check"
         probe "$url" "" $TIMEOUT_CLEARNET
         classify
@@ -400,6 +515,8 @@ scan_target() {
         if [[ "$control_verdict" != (CERT|WARN) ]]; then
             (( tor_specific )) && tor_specific_json=true || tor_specific_json=false
         fi
+    elif blocky "$tor_verdict"; then
+        tor_detail+="; clearnet control disabled — Tor specificity unknown"
     fi
 
     if [[ ${OUTPUT_FORMAT:-text} == jsonl ]]; then
@@ -471,7 +588,7 @@ run_scan() {
 # callers load the reusable definitions without starting a scan.
 main() {
     setopt localoptions localtraps
-    local parse_status target_file OUTPUT_FORMAT
+    local parse_status target_file
     local -a scan_targets
 
     configure_output
@@ -481,7 +598,11 @@ main() {
     (( parse_status == 2 )) && return 0
     (( parse_status == 0 )) || return "$parse_status"
     target_file=$REPLY
-    OUTPUT_FORMAT=${reply[2]}
+    # These locals dynamically scope the selected configuration to the command
+    # workflow. Sourcing the file leaves the documented defaults untouched.
+    local OUTPUT_FORMAT=${reply[2]} TOR_PROXY=${reply[3]} MAX_CIRCUITS=${reply[4]}
+    local TIMEOUT_FIRST=${reply[5]} TIMEOUT_RETRY=${reply[6]}
+    local TIMEOUT_CLEARNET=${reply[7]} CLEARNET_ENABLED=${reply[8]}
 
     load_targets "$target_file" || return 1
     scan_targets=("${reply[@]}")
