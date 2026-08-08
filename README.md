@@ -76,6 +76,31 @@ This script requires `zsh`, `curl`, and a local `tor` proxy to run.
    ./check_tor.zsh --format jsonl ~/tor-targets/mylist.txt
    ```
 
+   The scanner keeps its established behavior unless options override it:
+
+   | Option | Default | Accepted value |
+   |---|---:|---|
+   | `--proxy` | `localhost:9050` | SOCKS proxy as `HOST:PORT` |
+   | `--circuits` | `3` | `1`–`100` Tor attempts |
+   | `--timeout-first` | `60` | `1`–`3600` seconds |
+   | `--timeout-retry` | `30` | `1`–`3600` seconds |
+   | `--timeout-clearnet` | `20` | `1`–`3600` seconds |
+   | `--no-clearnet` | off | Skip the non-Tor control request |
+
+   For example, this uses a different local SOCKS port, tries two circuits,
+   and skips the clearnet comparison:
+
+   ```zsh
+   ./check_tor.zsh --proxy localhost:9150 --circuits 2 --no-clearnet \
+     ~/tor-targets/mylist.txt
+   ```
+
+   Without the clearnet control, persistent block-like results still describe
+   what the automated Tor requests observed, but Tor specificity remains
+   unknown. The scanner's HTTP request profile and 1 MiB response inspection
+   cap are intentionally fixed; these settings do not make `curl` impersonate
+   Tor Browser.
+
 4. **Stop the Tor proxy (when finished):**
    ```zsh
    tor-off
@@ -111,7 +136,7 @@ Each object contains `"schema_version": 1` and a `type` of `target` or
 
 * `target`, `verdict`, and a human-readable `detail`
 * `tor_attempts` and `tor_attempt_limit`
-* `clearnet_control.performed` and its nullable `verdict`
+* `clearnet_control.enabled`, `performed`, and its nullable `verdict`
 * nullable `tor_specific`, which is `true` or `false` only after a conclusive
   clearnet comparison
 * `body_limited`, which distinguishes the response-body cutoff from other
@@ -150,8 +175,8 @@ The repository has two complementary suites:
 * `tests/check_tor_integration_test.zsh` invokes `check_tor.zsh` as a user would.
   It places a controlled fake `curl` first in `PATH` to test argument failures,
   source-safe loading, target parsing and normalization, circuit retries,
-  clearnet controls, output summaries, curl arguments, and temporary-file
-  cleanup without reaching the network.
+  clearnet controls, validated setting overrides, output summaries, curl
+  arguments, and temporary-file cleanup without reaching the network.
 
 Run the complete local validation from the repository root:
 
@@ -164,7 +189,7 @@ git diff --check
 ```
 
 A successful run reports `All 66 offline checks passed.` and
-`All 91 offline integration checks passed.` The **Offline tests** GitHub Actions
+`All 128 offline integration checks passed.` The **Offline tests** GitHub Actions
 workflow runs the same syntax and test commands on Ubuntu and macOS for every
 pull request and push to `main`; it can also be started manually.
 
