@@ -46,8 +46,9 @@ Run the complete local validation:
 
 ```zsh
 test -x check_tor.zsh
-zsh -n check_tor.zsh check_tor_core.zsh tests/check_tor_test.zsh
+zsh -n check_tor.zsh check_tor_core.zsh tests/*.zsh
 zsh tests/check_tor_test.zsh
+zsh tests/check_tor_integration_test.zsh
 git diff --check
 ```
 

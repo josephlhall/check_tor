@@ -126,6 +126,16 @@ JSONL output contains the scanned targets and is sensitive operational data.
 Store it outside this repository with restrictive permissions; do not add it to
 Git or place it under a publicly accessible path.
 
+## Measurement limitations and validation
+
+`check_tor` uses `curl` as an approximation of Tor user experience. It does not
+reproduce Tor Browser's TLS and browser fingerprint, JavaScript, cookies,
+session state, or interactive challenge behavior. The next methodological work
+is to calibrate scanner verdicts against paired manual observations in Tor
+Browser and an ordinary non-Tor browser—not to begin continuous feature
+expansion. See [MEASUREMENT-VALIDATION.md](MEASUREMENT-VALIDATION.md) for the
+living research plan.
+
 ## Testing
 
 All tests are deterministic and offline. They use synthetic `.example.test`
