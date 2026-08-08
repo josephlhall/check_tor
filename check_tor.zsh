@@ -32,6 +32,8 @@ MAX_CIRCUITS=3
 TIMEOUT_FIRST=60      # first attempt over Tor
 TIMEOUT_RETRY=30      # retries on fresh circuits
 TIMEOUT_CLEARNET=20   # control request without Tor
+# Disabling the control suppresses the Tor-specific inference, not the
+# underlying verdict from the automated Tor probes.
 CLEARNET_ENABLED=1
 
 # Retain at most 1 MiB of each response body. WAF fingerprints are normally
@@ -168,6 +170,9 @@ usage() {
 
 parse_bounded_integer() {
     local value=$1 option_name=$2 maximum=$3
+    # Reject long digit strings before arithmetic expansion: shell integers
+    # have platform-sized limits, while every public setting has a much
+    # smaller bound. 10# then normalizes leading zeroes as decimal, never octal.
     if [[ "$value" != <-> ]] || (( ${#value} > 9 )); then
         print -u2 -r -- "Error: $option_name requires a positive integer no greater than $maximum."
         return 1
@@ -182,11 +187,16 @@ parse_bounded_integer() {
 
 validate_proxy() {
     local value=$1 host port normalized_host
+    # This option names a SOCKS endpoint only. Schemes, paths, and credentials
+    # would imply curl proxy features the scanner does not support or preserve
+    # in its measurement contract.
     if [[ -z "$value" || "$value" == *[[:space:]@/]* ]]; then
         print -u2 -r -- "Error: --proxy requires HOST:PORT without a URL scheme or credentials."
         return 1
     fi
 
+    # Brackets make an IPv6 literal's colons unambiguous from the port
+    # separator; unbracketed values must therefore contain exactly one colon.
     if [[ "$value" == \[*\]:* ]]; then
         host=${value%%]:*}
         host=${host#\[}
@@ -259,6 +269,10 @@ probe() {
         "$HDRS" > "$LASTH"
 }
 
+# Parse and validate the complete invocation before any dependency check or
+# network access. REPLY is the target file for legacy/source callers; reply is
+# the ordered configuration tuple consumed by main. Keep that tuple and main's
+# dynamically scoped locals in lockstep when adding a setting.
 parse_args() {
     local output_format=text target_file="" argument
     local proxy=$TOR_PROXY circuits=$MAX_CIRCUITS
@@ -500,8 +514,9 @@ scan_target() {
     fi
 
     # For persistent blocks, run a clearnet control request and compare how
-    # much worse Tor fared. Equal or gentler treatment on clearnet means the
-    # site is hostile to scripted clients generally, not to Tor.
+    # much worse Tor fared. If clearnet fares no better, this observation does
+    # not support a Tor-specific inference; it cannot establish the site's
+    # broader policy toward every kind of client.
     if blocky "$tor_verdict" && (( CLEARNET_ENABLED )); then
         transient "[$i/$total] $url — clearnet control check"
         probe "$url" "" $TIMEOUT_CLEARNET
