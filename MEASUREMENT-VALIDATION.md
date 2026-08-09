@@ -450,3 +450,44 @@ The work succeeds if it produces:
 - a clear basis for deciding whether a larger study is worth doing.
 
 The desired endpoint is a tool whose results are useful because their meaning and limits are understood—not because the tool has accumulated more switches.
+
+## Thoughts on model-assisted interpretation with GPT-5.3-Codex-Spark
+
+This section is a **planned extension** to the current protocol, not an established result.
+Spark is useful as a hypothesis and consistency aid for interpretation work, while
+all claims remain grounded in collected observations.
+
+Use it where it adds value in six places:
+
+- Decision-surface drafting:
+  Convert verdict-level evidence to human-experience labels using explicit fields the scanner already outputs
+  (`verdict`, circuit outcomes, `body_limited`, clearnet comparison fields), then manually review each mapping.
+
+- Disagreement atlas curation:
+  Normalize each mismatch into a repeated tuple:
+  `scanner verdict`, `browser outcomes`, `likely mechanism`, `alternative mechanism`, `next probe`.
+
+- Pilot site-selection planning:
+  Propose candidate cases that increase disagreement coverage (not just PASS-heavy cases),
+  including exit-sensitive, challenge-heavy, and automation-hostile-but-not-Tor-specific examples.
+
+- Edge-case probe design:
+  Suggest targeted scenarios with explicit hypotheses and falsification criteria
+  (e.g., challenge-only behavior, exit-reputation sensitivity, slow-but-usable degradation).
+
+- Contract-language guardrails:
+  Draft three-way wording for each interpretation: what is directly observed, what is inferred,
+  and what is not measured by this protocol.
+
+- Per-case evidence templates:
+  Create a stable note structure for scan fields, browser outcomes, disagreement class, confidence,
+  and follow-up action, reducing reviewer variance in Step 6.
+
+Suggested workflow:
+
+1. Generate one model-assisted pass after each 5–10 paired observations.
+2. Keep only high-confidence hypotheses as candidate follow-up tasks.
+3. Re-check every candidate against raw data, the frozen protocol, and this document’s success criteria.
+4. Add only protocol or documentation changes where evidence and review support them.
+
+Model output should never replace raw observation. Human review remains the sole final authority for protocol decisions.
