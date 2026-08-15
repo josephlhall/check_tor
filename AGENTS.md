@@ -9,6 +9,10 @@ operational data, not test fixtures. Unless a task explicitly concerns that
 data, do not inspect, modify, use in tests, expose in output, or force-add it.
 Never commit it. Use `targets-EXAMPLE.txt` or temporary files for testing.
 
+Use the deterministic offline suites under `tests/` for routine verification.
+Do not start Tor or run the live scanner against any target file unless the task
+explicitly requires live measurement.
+
 Keep raw measurement-validation artifacts—including JSONL, screenshots,
 browser notes, cookies, session data, and observed IP addresses—outside the
 repository. Only protocols, sanitized aggregate findings, and deliberately
