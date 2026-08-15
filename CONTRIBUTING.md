@@ -6,4 +6,7 @@ Please note that this repository is provided as an open-source utility (CC0 1.0 
 
 This tool is provided "as-is" to assist with testing reachability over the Tor network. 
 
-If you would like to modify the tool for your own use case, please feel free to fork the repository. Any pull requests submitted to this main repository will be closed unmerged.
+If you would like to modify the tool for your own use case, please feel free to
+fork the repository. Unsolicited pull requests from outside contributors will
+be closed unmerged; maintainers may continue to use protected pull requests for
+repository maintenance.
