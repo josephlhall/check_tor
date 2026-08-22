@@ -161,6 +161,21 @@ Browser and an ordinary non-Tor browser—not to begin continuous feature
 expansion. See [MEASUREMENT-VALIDATION.md](MEASUREMENT-VALIDATION.md) for the
 living research plan.
 
+## Releases and versioning
+
+`check_tor` is released software and uses annotated Semantic Versioning tags
+(`vMAJOR.MINOR.PATCH`). Use patch for backward-compatible fixes or material
+documentation corrections, minor for backward-compatible capabilities, and
+major for incompatible public CLI, behavior, or structured-output contract
+changes. An issue's release-impact classification predicts the appropriate next
+version when a release is cut; closing an issue never creates a tag by itself.
+
+A release may deliberately collect a coherent accepted issue set. Tag only the
+final verified commit after that complete scope passes the offline suites.
+Normally publish a GitHub Release for a `check_tor` tag so users and future
+contributors receive a curated change summary; if a tag is intentionally only
+a source checkpoint, record that decision before tagging.
+
 ## Testing
 
 All tests are deterministic and offline. They use synthetic `.example.test`
