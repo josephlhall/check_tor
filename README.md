@@ -1,6 +1,13 @@
 # Tor Reachability Scanner
 
-A `zsh` utility script for Project Galileo that automates testing a list of domains against a local Tor SOCKS proxy. It verifies whether sites are accessible over the Tor network, checking for WAF blocks, SSL/TLS certificate misconfigurations, and SOCKS connection failures—and diagnoses *who* is doing the blocking and whether the block is Tor-specific. By Joseph Lorenzo Hall, PhD (<https://josephhall.org/>)
+A `zsh` utility script for Project Galileo that probes a list of domains through
+a local Tor SOCKS proxy. It classifies automated HTTPS outcomes such as HTTP
+refusals, challenge-like responses, TLS failures, and SOCKS failures. For a
+persistent block-like result, an automated clearnet control can show whether
+the Tor request fared worse. Recognized response signatures can suggest the
+edge or WAF involved; they do not by themselves establish site policy or human
+Tor Browser usability. By Joseph Lorenzo Hall, PhD
+(<https://josephhall.org/>)
 
 ## Prerequisites & Installation
 
@@ -153,13 +160,19 @@ Git or place it under a publicly accessible path.
 
 ## Measurement limitations and validation
 
-`check_tor` uses `curl` as an approximation of Tor user experience. It does not
-reproduce Tor Browser's TLS and browser fingerprint, JavaScript, cookies,
-session state, or interactive challenge behavior. The next methodological work
-is to calibrate scanner verdicts against paired manual observations in Tor
-Browser and an ordinary non-Tor browser—not to begin continuous feature
-expansion. See [MEASUREMENT-VALIDATION.md](MEASUREMENT-VALIDATION.md) for the
-living research plan.
+`check_tor` measures how sites respond to automated `curl` requests over Tor;
+its verdicts are not validated claims about human Tor Browser usability. It
+does not reproduce Tor Browser's TLS and browser fingerprint, JavaScript,
+cookies, session state, or interactive challenge behavior. The next
+methodological work is to calibrate scanner verdicts against paired manual
+observations in Tor Browser and an ordinary non-Tor browser—not to begin
+continuous feature expansion. See
+[MEASUREMENT-VALIDATION.md](MEASUREMENT-VALIDATION.md) for the living research
+plan. The protocol freeze and dry run are tracked in
+[issue #32](https://github.com/josephlhall/check_tor/issues/32); the subsequent
+stratified pilot is tracked in
+[issue #33](https://github.com/josephlhall/check_tor/issues/33) and depends on
+that frozen protocol.
 
 ## Releases and versioning
 
@@ -232,27 +245,68 @@ If a real list has already been committed, deleting it in a new commit is **not*
 
 The script does more than fetch a status code:
 
-* **Multiple circuits before declaring a block.** A block-ish result (FAIL, CHALLENGE, RATE LIMIT, DROP, TIMEOUT, SOCKS ERROR) is retried on up to 3 fresh Tor circuits (via SOCKS credential isolation—no ControlPort needed). A site that fails on all 3 has a site-wide policy; a site that passes on retry was just rejecting one exit node's IP reputation, and is reported as PASS with a note.
-* **A clearnet control request, compared by severity.** A block that persists across every circuit is re-tested *without* Tor, and the two results are ranked by how badly each impedes a real user: served normally, passable with friction (a challenge a browser can solve), or impassable. A site is only reported as blocking Tor when Tor fares *strictly worse* than an ordinary client. This clears sites that are simply hostile to every scripted client, and it catches escalation—a site that challenges everyone but hard-blocks Tor is flagged as "escalated for Tor". If the control request itself fails uninformatively (broken origin, TLS error), the result is labelled inconclusive and kept in the summary for a manual look.
-* **Blocker fingerprinting.** Response headers and bodies are inspected to name the blocker: Cloudflare error codes (1020 firewall rule, 1015 rate limit, 1006/1007/1008 IP ban—these ride inside an HTTP 403, not on the status line), `cf-mitigated: challenge` (managed challenge), Akamai, Sucuri, and Imperva/Incapsula signatures.
+* **Multiple attempts before treating a result as persistent.** A block-like
+  result (FAIL, CHALLENGE, RATE LIMIT, DROP, TIMEOUT, SOCKS ERROR) is retried up
+  to the configured attempt limit. Disposable SOCKS usernames request circuit
+  isolation without a ControlPort, but they do not prove that every attempt
+  used a distinct exit. Persistence across the sampled attempts is therefore
+  not proof of a site-wide policy. A later PASS is reported with a note that
+  the automated observation was circuit-dependent.
+* **An automated clearnet control, compared by severity.** A result that
+  remains block-like across the Tor attempts is re-tested with `curl` *without*
+  Tor. The built-in severity ordering determines whether the Tor result was
+  strictly worse, no worse, or inconclusive. This comparison can support a
+  `tor_specific` inference about the paired automated requests; it does not
+  substitute for an ordinary-browser or Tor Browser usability comparison.
+* **Blocker fingerprinting.** Response headers and bodies are inspected for
+  recognized Cloudflare error codes (1020 firewall rule, 1015 rate limit,
+  1006/1007/1008 IP ban—these ride inside an HTTP 403, not on the status line),
+  `cf-mitigated: challenge` (managed challenge), Akamai, Sucuri, and
+  Imperva/Incapsula signatures. These signatures identify likely response
+  infrastructure or mechanisms, not necessarily who selected the policy.
   Response-body inspection is limited to the first 1 MiB per probe. If a body
   reaches that limit, the result is an inconclusive warning rather than block
   evidence; a fingerprint appearing only later in the response may be missed.
-* **Summary.** The scan ends with per-verdict counts and a list of the domains where Tor was treated worse than an ordinary client.
+* **Summary.** Text output ends with per-verdict counts and a manual-review
+  list. That list includes results where the automated clearnet control fared
+  better as well as results whose control was inconclusive. In JSONL, use the
+  nullable `tor_specific` field for each target and
+  `tor_specific_findings` for the count of conclusive Tor-worse comparisons.
 
 ## Output Legend
 
 The script evaluates `curl` exit codes, HTTP status codes, and response contents to provide specific diagnostics:
 
-* **[PASS]** (Green): Final status 200 after following redirects. The site is successfully serving Tor traffic. If earlier circuits were blocked, the result notes the block is exit-dependent rather than site-wide.
-* **[CHALLENGE]** (Cyan): The request reached the host, but a WAF is interposing a challenge: a Cloudflare managed challenge (403 + `cf-mitigated`), a JS challenge / under-attack page (503), an async queue (202), or a 200 that actually landed on a `/cdn-cgi/` challenge page. Tor users with JavaScript enabled may still get through, with friction.
-* **[RATE LIMIT]** (Yellow): Status 429. Not necessarily a deliberate Tor block, but exit IPs are shared by many users and burn through rate limits, so Tor users are effectively locked out.
-* **[FAIL]** (Red): Status 403 or 401 on every circuit tried. The server is actively refusing the request, likely a WAF rule targeting Tor exit nodes; the specific blocker (e.g. "Cloudflare 1020: blocked by a firewall rule") is named when identifiable.
-* **[DROP]** (Red): The connection failed while receiving data (curl exit 56—commonly a mid-request reset), closed with no reply (exit 52), or was truncated mid-transfer (exit 18)—the signature of a firewall silently killing Tor connections, arguably stronger block evidence than a 403.
-* **[CERT ERROR]** (Purple): The destination server has an invalid, self-signed, or expired SSL/TLS certificate, terminating the secure connection before an HTTP status can be negotiated.
-* **[SOCKS ERROR]** (Red): The Tor circuit was built, but the exit node could not complete the connection to the host server.
-* **[TIMEOUT]** (Yellow): The connection hung. The detail distinguishes a stall *after* the TLS handshake (tarpitting) from never getting a response at all (silent drop or dead host).
-* **[WARNING]** (Yellow): Anything else—unexpected status codes, redirect loops, unusual curl failures—printed with the raw codes for manual triage.
+* **[PASS]** (Green): The final automated response was HTTP 200 after following
+  redirects. If earlier attempts were block-like, the detail records that the
+  observed result changed across attempts. This does not establish rendered or
+  interactive browser usability.
+* **[CHALLENGE]** (Cyan): The response matched a challenge-like condition: a
+  Cloudflare managed challenge (403 + `cf-mitigated`), a recognized WAF-backed
+  503, an async queue (202), or a 200 ending on a `/cdn-cgi/` challenge page.
+  Whether a human Tor Browser session can pass it remains a validation
+  question.
+* **[RATE LIMIT]** (Yellow): The automated Tor response was HTTP 429. Shared
+  exit use can contribute to rate limiting, but the verdict alone does not
+  identify intent or establish the human browser outcome.
+* **[FAIL]** (Red): The final automated Tor attempts returned HTTP 401 or 403.
+  A recognized response signature is included when available. Consult the
+  clearnet-control fields before inferring that the refusal was Tor-specific.
+* **[DROP]** (Red): `curl` reported a receive failure (exit 56), empty reply
+  (exit 52), or truncated transfer (exit 18). The verdict records the transport
+  symptom without proving whether a firewall, origin, exit, or transient
+  network condition caused it.
+* **[CERT ERROR]** (Purple): `curl` could not complete certificate validation or
+  the TLS handshake, so no usable HTTP response was classified.
+* **[SOCKS ERROR]** (Red): `curl` could not resolve the configured SOCKS proxy
+  or complete its proxy/SOCKS handshake. This diagnoses the proxy path, not a
+  destination-site policy.
+* **[TIMEOUT]** (Yellow): `curl` timed out or could not establish the
+  connection. When available, the detail distinguishes a stall after TLS from
+  a failure before any response; the causal explanation remains uncertain.
+* **[WARNING]** (Yellow): Anything else—including unexpected status codes,
+  redirect loops, unusual `curl` failures, and the intentional response-body
+  cutoff—is left for manual triage.
 
 ## License
 
