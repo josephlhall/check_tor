@@ -1,6 +1,10 @@
 # Validating the `check_tor` Measurement Model
 
-> **Status:** Working research plan
+> **Status:** Working research plan; no calibration findings are established.
+> The protocol freeze and dry run are tracked in
+> [issue #32](https://github.com/josephlhall/check_tor/issues/32), and the
+> dependent stratified pilot is tracked in
+> [issue #33](https://github.com/josephlhall/check_tor/issues/33).
 > **Purpose:** Define what `check_tor` can legitimately claim, test how its verdicts correspond to real Tor Browser experience, and improve interpretation before adding more product features.
 > **Scope:** Methodology and calibration, not a promise of validated accuracy.
 
@@ -333,7 +337,7 @@ A possible local layout is:
 
 That directory should remain outside the Git repository. If any local study-output directory is created inside the checkout for convenience, add it to `.gitignore` before collecting data.
 
-## First steps after the bounded implementation work
+## Planned execution sequence
 
 The first milestone should be deliberately small.
 
@@ -451,11 +455,12 @@ The work succeeds if it produces:
 
 The desired endpoint is a tool whose results are useful because their meaning and limits are understood—not because the tool has accumulated more switches.
 
-## Thoughts on model-assisted interpretation with GPT-5.3-Codex-Spark
+## Model-assisted interpretation
 
 This section is a **planned extension** to the current protocol, not an established result.
-Spark is useful as a hypothesis and consistency aid for interpretation work, while
-all claims remain grounded in collected observations.
+A fast implementation-oriented model can serve as a hypothesis and consistency
+aid for interpretation work, while all claims remain grounded in collected
+observations.
 
 Use it where it adds value in six places:
 
