@@ -5,8 +5,8 @@ a local Tor SOCKS proxy. It classifies automated HTTPS outcomes such as HTTP
 refusals, challenge-like responses, TLS failures, and SOCKS failures. For a
 persistent block-like result, an automated clearnet control can show whether
 the Tor request fared worse. Recognized response signatures can suggest the
-edge or WAF involved; they do not by themselves establish site policy or human
-Tor Browser usability. By Joseph Lorenzo Hall, PhD
+edge or WAF involved; they do not by themselves establish site policy or the
+practical access available to a human Tor Browser user. By Joseph Lorenzo Hall, PhD
 (<https://josephhall.org/>)
 
 ## Prerequisites & Installation
@@ -161,14 +161,21 @@ Git or place it under a publicly accessible path.
 ## Measurement limitations and validation
 
 `check_tor` measures how sites respond to automated `curl` requests over Tor;
-its verdicts are not validated claims about human Tor Browser usability. It
+its verdicts are not validated claims about practical access in Tor Browser. It
 does not reproduce Tor Browser's TLS and browser fingerprint, JavaScript,
 cookies, session state, or interactive challenge behavior. The next
 methodological work is to calibrate scanner verdicts against paired manual
 observations in Tor Browser and an ordinary non-Tor browser—not to begin
 continuous feature expansion. See
 [MEASUREMENT-VALIDATION.md](MEASUREMENT-VALIDATION.md) for the living research
-plan. The protocol freeze and dry run are tracked in
+plan. The governed protocol packet and sanitized five-case procedural record
+are available in the
+[Tor Access Comparison Protocol](VALIDATION-PROTOCOL.md),
+[ethics and data-stewardship policy](ETHICS-AND-DATA-STEWARDSHIP.md), and
+[reference-endpoint catalog](REFERENCE-ENDPOINTS.md), with dry-run evidence in
+[VALIDATION-DRY-RUN.md](VALIDATION-DRY-RUN.md). `TACP-0.2` is frozen as the
+methodological basis for issue #33, but that freeze does not authorize other
+collection. The protocol freeze and dry run are tracked in
 [issue #32](https://github.com/josephlhall/check_tor/issues/32); the subsequent
 stratified pilot is tracked in
 [issue #33](https://github.com/josephlhall/check_tor/issues/33) and depends on
@@ -257,7 +264,7 @@ The script does more than fetch a status code:
   Tor. The built-in severity ordering determines whether the Tor result was
   strictly worse, no worse, or inconclusive. This comparison can support a
   `tor_specific` inference about the paired automated requests; it does not
-  substitute for an ordinary-browser or Tor Browser usability comparison.
+  substitute for an ordinary-browser or Tor Browser access comparison.
 * **Blocker fingerprinting.** Response headers and bodies are inspected for
   recognized Cloudflare error codes (1020 firewall rule, 1015 rate limit,
   1006/1007/1008 IP ban—these ride inside an HTTP 403, not on the status line),
@@ -280,7 +287,7 @@ The script evaluates `curl` exit codes, HTTP status codes, and response contents
 * **[PASS]** (Green): The final automated response was HTTP 200 after following
   redirects. If earlier attempts were block-like, the detail records that the
   observed result changed across attempts. This does not establish rendered or
-  interactive browser usability.
+  interactive browser access or task completion.
 * **[CHALLENGE]** (Cyan): The response matched a challenge-like condition: a
   Cloudflare managed challenge (403 + `cf-mitigated`), a recognized WAF-backed
   503, an async queue (202), or a 200 ending on a `/cdn-cgi/` challenge page.
