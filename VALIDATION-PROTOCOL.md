@@ -3,7 +3,8 @@
 > **Status:** FROZEN FOR ISSUE #33<br>
 > **Protocol ID:** TACP-0.2<br>
 > **Dry-run approval:** Joseph Lorenzo Hall, 2026-08-30 (`TACP-0.1`)<br>
-> **Intended use:** Methodological basis for issue #33; live collection requires separate authorization<br>
+> **Intended use:** Methodological basis for issue #33; a human-approved pilot
+> manifest and explicit live authority are still required<br>
 > **Scanner baseline:**
 > `fc13260f87c01e56db376858d90d837abcda1eaa`<br>
 > **Human approval:** Joseph Lorenzo Hall, 2026-08-30<br>
@@ -46,9 +47,15 @@ It cannot establish:
 - that a verdict predicts human browser access beyond the five deliberately
   chosen cases.
 
-The later stratified pilot in issue #33 is out of scope until this protocol has
-completed the dry run, received no more than one evidence-driven revision, and
-been explicitly marked `FROZEN FOR ISSUE #33` by the human reviewer.
+The later stratified pilot in issue #33 is outside this completed five-case
+dry-run evidence. Its per-case protocol prerequisite is complete: this
+document completed the dry run, received its one evidence-driven revision, and
+was explicitly marked `FROZEN FOR ISSUE #33`. Before any pilot collection, the human
+reviewer must approve an experiment-level pilot manifest and grant separate
+explicit live authority. That manifest must freeze the approved endpoints,
+sample allocation or stopping rule, current environment, order schedule, batch
+plan, storage boundary, and remote-observation mode without silently revising
+this per-case procedure.
 
 ## Measurement contract
 
@@ -163,8 +170,14 @@ Record all timestamps in UTC using an unambiguous ISO 8601 form such as
 
 ## Frozen environment record
 
-No live observation may begin until every `BLOCKING` field below is replaced
-with a reviewed value.
+This table preserves the reviewed `TACP-0.2` baseline used to complete issue
+#32. It is not an issue #33 pilot manifest and does not authorize live work.
+Before any separately authorized pilot collection, the human reviewer must
+reverify the current environment and approve the experiment-level manifest
+described above. Any change that materially alters the per-case method requires
+a new protocol revision; otherwise, record the verified current value in the
+approved pilot material rather than treating this historical baseline as a
+fresh measurement.
 
 | Field | Frozen value |
 |---|---|

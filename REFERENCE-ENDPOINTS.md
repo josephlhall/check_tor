@@ -262,15 +262,15 @@ eligible endpoint has been selected; it does not authorize discovery traffic.
 
 `targets-EXAMPLE.txt` contains well-known public sites that the repository has
 already designated safe as examples. They are not automatically `verified`
-catalog entries for this study. Before one can become a dry-run case, the human
-reviewer must approve:
+catalog entries for this study. Before one can become an issue #33 pilot case,
+the human reviewer must approve:
 
 - the exact public task and navigation;
 - the authorization basis and interaction limit;
 - whether naming the site creates an unwanted association;
 - the current stability and statefulness assessment;
 - the verification date; and
-- its role in the five-case procedural sample.
+- its role in the approved pilot allocation or stopping rule.
 
 Do not record or publish a presumed verdict, WAF, Tor policy, or human outcome
 for an ordinary public candidate before the contemporaneous protocol
@@ -288,8 +288,8 @@ remain unfilled rather than expanding scope.
 
 ## Case selection gate
 
-Before Checkpoint C can mark the protocol ready for the five-case dry run, each
-selected entry must have:
+The following gate governed the completed issue #32 dry run. Each selected
+entry had:
 
 - a completed catalog record and current verification date;
 - an approved authorization basis and publication-sensitivity decision;
@@ -300,9 +300,12 @@ selected entry must have:
 - a replacement rule that requires human approval rather than silent
   substitution.
 
-The five selected cases will be recorded here only when they are deliberately
-public and safe to name. Otherwise the public dry-run note will use anonymous
-case IDs and sanitized behavior descriptions.
+The five selected cases are recorded above because they are deliberately public
+and safe to name. For issue #33, do not treat their prior approval as an
+approved pilot list: each candidate must appear in the human-approved pilot
+manifest with current verification, an authorization and publication-sensitivity
+decision, an interaction limit, and a preassigned order/batch slot. That
+manifest and separate live authority remain required before collection.
 
 ## Sources
 

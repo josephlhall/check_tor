@@ -11,7 +11,10 @@ practical access available to a human Tor Browser user. By Joseph Lorenzo Hall, 
 
 ## Prerequisites & Installation
 
-This script requires `zsh`, `curl`, and a local `tor` proxy to run.
+This script requires `zsh`, `curl`, and a local `tor` proxy to run. At runtime
+it also uses standard command-line utilities (`awk`, `grep`, `head`, `cut`,
+`tr`, `wc`, and `mktemp`), which are available by default on supported macOS
+and Debian/Ubuntu installations.
 
 ### For macOS
 1. **Install dependencies via Homebrew:**
@@ -115,9 +118,13 @@ This script requires `zsh`, `curl`, and a local `tor` proxy to run.
 
 ### Output, color, and exit status
 
-Scan results and progress are written to stdout. Invocation, input, dependency,
+Scan output and progress are written to stdout. Invocation, input, dependency,
 and Tor preflight failures are written to stderr. This allows redirected output
-to contain scan results without mixing in fatal diagnostics.
+to capture completed scan output without mixing in fatal diagnostics.
+
+In text mode, a successful Tor preflight reports the current exit IP on stdout.
+Treat captured text output accordingly. JSONL mode emits no preflight prose or
+exit IP, but its target records remain sensitive operational data.
 
 Color is enabled when stdout is an interactive terminal. Redirected output is
 plain text. Set [`NO_COLOR`](https://no-color.org/) to any value to disable
@@ -163,23 +170,23 @@ Git or place it under a publicly accessible path.
 `check_tor` measures how sites respond to automated `curl` requests over Tor;
 its verdicts are not validated claims about practical access in Tor Browser. It
 does not reproduce Tor Browser's TLS and browser fingerprint, JavaScript,
-cookies, session state, or interactive challenge behavior. The next
-methodological work is to calibrate scanner verdicts against paired manual
-observations in Tor Browser and an ordinary non-Tor browser—not to begin
-continuous feature expansion. See
-[MEASUREMENT-VALIDATION.md](MEASUREMENT-VALIDATION.md) for the living research
+cookies, session state, or interactive challenge behavior. The completed
+five-case dry run established the governed procedure; the next methodological
+stage is the stratified manual pilot in issue #33, after its human-approved
+pilot manifest and explicit live-collection authority. See
+[MEASUREMENT-VALIDATION.md](MEASUREMENT-VALIDATION.md) for the current research
 plan. The governed protocol packet and sanitized five-case procedural record
 are available in the
 [Tor Access Comparison Protocol](VALIDATION-PROTOCOL.md),
 [ethics and data-stewardship policy](ETHICS-AND-DATA-STEWARDSHIP.md), and
 [reference-endpoint catalog](REFERENCE-ENDPOINTS.md), with dry-run evidence in
 [VALIDATION-DRY-RUN.md](VALIDATION-DRY-RUN.md). `TACP-0.2` is frozen as the
-methodological basis for issue #33, but that freeze does not authorize other
-collection. The protocol freeze and dry run are tracked in
-[issue #32](https://github.com/josephlhall/check_tor/issues/32); the subsequent
-stratified pilot is tracked in
-[issue #33](https://github.com/josephlhall/check_tor/issues/33) and depends on
-that frozen protocol.
+methodological basis for issue #33, but does not authorize that pilot's live
+collection. The closed
+[issue #32](https://github.com/josephlhall/check_tor/issues/32) tracks the
+protocol freeze and dry run; the open
+[issue #33](https://github.com/josephlhall/check_tor/issues/33) tracks the
+subsequent pilot planning.
 
 ## Releases and versioning
 
