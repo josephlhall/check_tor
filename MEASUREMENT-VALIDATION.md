@@ -5,7 +5,13 @@
 > [issue #32](https://github.com/josephlhall/check_tor/issues/32), and the
 > dependent stratified pilot is tracked in
 > [issue #33](https://github.com/josephlhall/check_tor/issues/33).
-> **Purpose:** Define what `check_tor` can legitimately claim, test how its verdicts correspond to real Tor Browser experience, and improve interpretation before adding more product features.
+> The governed protocol packet and sanitized dry-run evidence are in
+> [VALIDATION-PROTOCOL.md](VALIDATION-PROTOCOL.md),
+> [ETHICS-AND-DATA-STEWARDSHIP.md](ETHICS-AND-DATA-STEWARDSHIP.md), and
+> [REFERENCE-ENDPOINTS.md](REFERENCE-ENDPOINTS.md), with procedural evidence in
+> [VALIDATION-DRY-RUN.md](VALIDATION-DRY-RUN.md). `TACP-0.2` is frozen for issue
+> #33, but the freeze does not authorize other live measurement.
+> **Purpose:** Define what `check_tor` can legitimately claim, compare its verdicts with practical access in Tor Browser, and improve interpretation before adding more product features.
 > **Scope:** Methodology and calibration, not a promise of validated accuracy.
 
 ## Why this work matters
@@ -17,7 +23,7 @@ The scanner observes sites through `curl` over Tor. When a block-like result per
 The goal of this work is therefore **not to prove that `check_tor` is right**. It is to determine:
 
 - what the scanner directly measures;
-- what each verdict predicts about actual user experience;
+- what each verdict predicts about practical access in Tor Browser;
 - where the scanner is systematically optimistic or pessimistic;
 - which disagreements come from Tor exit reputation, client fingerprinting, browser behavior, or changing conditions;
 - how the tool and its documentation should describe those limits.
@@ -31,7 +37,7 @@ Several related questions can easily be conflated:
 3. **Can a human using Tor Browser reach and use the site?**
 4. **Is a Tor user materially disadvantaged compared with an ordinary browser user?**
 
-The current scanner is strongest at question 2. Project Galileo and other public-interest uses often care most about questions 3 and 4.
+The current scanner is strongest at question 2. Public-interest uses often care most about questions 3 and 4.
 
 The validation study should measure the gap between them rather than assuming they are equivalent.
 
@@ -40,7 +46,7 @@ The validation study should measure the gap between them rather than assuming th
 This work is not intended to:
 
 - estimate how much of the Internet blocks Tor;
-- assess or rank Project Galileo applicants;
+- assess or rank organizations or applicants;
 - use live or historical operational candidate lists;
 - reproduce every behavior of every browser, WAF, CDN, or edge network;
 - bypass access controls, CAPTCHAs, or anti-abuse systems;
@@ -60,17 +66,17 @@ For example, if repeated automated Tor requests receive HTTP 403 responses but T
 
 A successful validation effort may therefore change verdict language or documentation without changing classification code.
 
-### 2. Treat usability as graded, not binary
+### 2. Treat browser access as graded, not binary
 
 A human experience should initially be classified using a small rubric:
 
-- **Normal:** public content loads and can be used without meaningful intervention.
-- **Friction:** the site becomes usable after a short delay, retry, browser challenge, or similar step.
+- **Normal:** the public task succeeds without meaningful intervention.
+- **Friction:** the public task succeeds after a short delay, retry, browser challenge, or similar step.
 - **Severely degraded:** some content loads, but meaningful use is impaired or unreliable.
-- **Blocked:** no usable public content can be reached after the defined attempts.
+- **Blocked:** no meaningful public content can be reached after the defined attempts.
 - **Inconclusive:** the result cannot be interpreted fairly because of login requirements, a broken origin, geographic behavior, inconsistent conditions, or another confounder.
 
-The study should define “usable” before data collection. For the first pilot, a conservative definition could be:
+The study should define a successful public task before data collection. For the first pilot, a conservative definition could be:
 
 > The primary public page reaches meaningful content, required first-party resources load, and one ordinary public navigation action succeeds without entering credentials or submitting personal data.
 
@@ -100,7 +106,7 @@ The pilot should explicitly investigate order effects by alternating or randomiz
 
 ### 6. Separate ecological comparison from same-exit experiments
 
-A normal Tor Browser session and a `check_tor` scan will often use different Tor exits. That is appropriate for the initial ecological question: “What does a real user experience around the same time?”
+A normal Tor Browser session and a `check_tor` scan will often use different Tor exits. That is appropriate for the initial ecological question: “Does the scanner describe the practical access available to a Tor Browser user around the same time?”
 
 For selected disagreements, a later targeted experiment may attempt a same-exit comparison to distinguish:
 
@@ -134,12 +140,12 @@ These are hypotheses to test, not established conclusions.
 
 | `check_tor` verdict | What the scanner directly observed | Initial human-experience hypothesis |
 |---|---|---|
-| `PASS` | A successful automated response over Tor after redirects, possibly after an earlier exit-specific problem | Strong predictor that Tor Browser reaches usable content |
+| `PASS` | A successful automated response over Tor after redirects, possibly after an earlier exit-specific problem | Strong predictor that Tor Browser reaches meaningful content and completes the public task |
 | `CHALLENGE` | The edge returned a recognizable challenge or challenge-like response | Predictor of user friction; browser may solve or pass the challenge |
 | `RATELIMIT` (`RATE LIMIT` in text output) | HTTP 429 over Tor | Predictor of unreliable or severely degraded access, especially on shared exits |
 | `FAIL` | Repeated HTTP 401/403 responses across the configured Tor attempts | Strong evidence that automated Tor requests are refused; may overstate complete human blocking |
 | `DROP` | Connection reset, empty reply, or truncated transfer | Predictor of serious impairment; browser behavior may still differ |
-| `TIMEOUT` | No timely usable response | Predictor of degradation, but sensitive to patience, protocol, origin health, and exit conditions |
+| `TIMEOUT` | No timely meaningful response | Predictor of degradation, but sensitive to patience, protocol, origin health, and exit conditions |
 | `CERT` (`CERT ERROR` in text output) | TLS certificate validation prevented an HTTP exchange | Likely user-visible security failure, though browsers may present different interstitial behavior |
 | `SOCKS` (`SOCKS ERROR` in text output) | The Tor exit could not complete the connection | Often exit-specific or network-specific rather than evidence of site policy |
 | `WARN` (`WARNING` in text output) | The result fell outside a confident classification | Should remain inconclusive unless manual review establishes a recurring pattern |
@@ -150,7 +156,7 @@ The study should not reduce every comparison to “correct” or “incorrect.�
 
 - **Strong agreement:** scanner and browser indicate the same practical outcome.
 - **Acceptable semantic agreement:** the labels differ, but the scanner correctly identifies the relevant friction or impairment.
-- **Scanner pessimistic:** the scanner suggests a block or severe failure while Tor Browser is usable.
+- **Scanner pessimistic:** the scanner suggests a block or severe failure while Tor Browser completes the task.
 - **Scanner optimistic:** the scanner passes while Tor Browser is blocked or materially degraded.
 - **Exit-dependent disagreement:** results change mainly with Tor exit identity or reputation.
 - **Client-dependent disagreement:** browser capabilities, fingerprint, JavaScript, cookies, or session state explain the difference.
@@ -173,7 +179,7 @@ Tasks:
 
 - Review every verdict description in the README.
 - Separate direct observations from inferences.
-- Identify wording that implies more about human usability than the scanner observes.
+- Identify wording that implies more about human browser access than the scanner observes.
 - Record the exact tool version and default settings to be validated.
 - Decide whether the study evaluates the current defaults or a fixed explicit
   configuration. The scanner defaults to `localhost:9050`, three Tor attempts,
@@ -233,7 +239,7 @@ Controlled endpoints should be low-risk, clearly documented, and operated with p
 
 ### Phase 3: Expand only after the pilot teaches us how
 
-The pilot should answer whether the rubric is usable and which disagreements matter. Only then should the sample expand.
+The pilot should answer whether the rubric is workable and which disagreements matter. Only then should the sample expand.
 
 Possible later dimensions:
 
@@ -315,8 +321,14 @@ Use `./check_tor.zsh --format jsonl` for the scanner record rather than parsing 
 ## Data handling and repository boundaries
 
 This study must not recreate the target-list problem it is meant to help solve.
+The governed safeguards and operational approval rules are in
+[ETHICS-AND-DATA-STEWARDSHIP.md](ETHICS-AND-DATA-STEWARDSHIP.md); the procedure
+is in [VALIDATION-PROTOCOL.md](VALIDATION-PROTOCOL.md). The completed issue #32
+authorization did not extend beyond its five cases. `TACP-0.2` is frozen for
+issue #33, but live collection still requires separate authorization. This
+section remains planning context rather than collection authority.
 
-- Do not use live or historical Galileo candidate lists.
+- Do not use non-public operational or historical target lists.
 - Use public validation cases selected specifically for the study or controlled endpoints.
 - Keep raw JSONL, screenshots, browsing notes, and any sensitive target lists outside this repository.
 - Do not commit cookies, challenge tokens, IP addresses, authentication material, or personal information.
@@ -324,18 +336,10 @@ This study must not recreate the target-list problem it is meant to help solve.
 - Use anonymous case IDs if a public domain’s inclusion could itself create an unwanted association.
 - Keep request volume low and avoid logging in, submitting forms, solving CAPTCHAs through third-party services, or attempting to circumvent access controls.
 
-A possible local layout is:
-
-```text
-~/check_tor-validation/
-├── protocol/
-├── raw-jsonl/
-├── browser-notes/
-├── screenshots/
-└── analysis/
-```
-
-That directory should remain outside the Git repository. If any local study-output directory is created inside the checkout for convenience, add it to `.gitignore` before collecting data.
+The private study-data root and retention schedule must be approved before
+collection. Raw measurement artifacts must remain outside this repository;
+adding an in-tree study directory to `.gitignore` is not an acceptable
+substitute.
 
 ## Planned execution sequence
 
@@ -369,6 +373,10 @@ Review this against the README before collecting data.
 - Decide the maximum time per case.
 
 ### Step 4: Run a five-case dry run
+
+Completed on 2026-08-30 under `TACP-0.1`. See the sanitized
+[dry-run procedural record](VALIDATION-DRY-RUN.md). The resulting single
+revision, `TACP-0.2`, was accepted and frozen for issue #33 on 2026-08-30.
 
 Choose five deliberately public cases representing different verdicts. The purpose is not to draw conclusions. It is to find procedural problems:
 
@@ -428,7 +436,7 @@ The first useful deliverable should be a short evidence-based note, not a new fe
 
 At minimum:
 
-1. Does `PASS` strongly predict usable Tor Browser access?
+1. Does `PASS` strongly predict successful Tor Browser access?
 2. When `CHALLENGE` is reported, how often is the challenge visible and solvable in Tor Browser?
 3. How often does `FAIL` mean complete human blocking versus browser-resolvable friction?
 4. Are `DROP` and `TIMEOUT` more or less predictive of browser failure than HTTP refusal?
@@ -446,7 +454,7 @@ Success is not a perfect agreement percentage.
 The work succeeds if it produces:
 
 - a defensible statement of what `check_tor` measures;
-- a repeatable manual validation protocol;
+- a repeatable manual access-comparison protocol;
 - an interpretation guide grounded in observation;
 - known disagreement patterns;
 - explicit limits on what each verdict permits a user to conclude;
@@ -478,7 +486,7 @@ Use it where it adds value in six places:
 
 - Edge-case probe design:
   Suggest targeted scenarios with explicit hypotheses and falsification criteria
-  (e.g., challenge-only behavior, exit-reputation sensitivity, slow-but-usable degradation).
+  (e.g., challenge-only behavior, exit-reputation sensitivity, slow-with-friction degradation).
 
 - Contract-language guardrails:
   Draft three-way wording for each interpretation: what is directly observed, what is inferred,
