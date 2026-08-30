@@ -1,9 +1,10 @@
 # Validating the `check_tor` Measurement Model
 
-> **Status:** Working research plan; no calibration findings are established.
-> The protocol freeze and dry run are tracked in
+> **Status:** Research roadmap; issue #32 completed the protocol freeze and
+> five-case dry run, but no calibration findings are established. The closed
+> protocol work is tracked in
 > [issue #32](https://github.com/josephlhall/check_tor/issues/32), and the
-> dependent stratified pilot is tracked in
+> open, planning-only stratified pilot is tracked in
 > [issue #33](https://github.com/josephlhall/check_tor/issues/33).
 > The governed protocol packet and sanitized dry-run evidence are in
 > [VALIDATION-PROTOCOL.md](VALIDATION-PROTOCOL.md),
@@ -167,15 +168,22 @@ The most important cases are scanner optimism, because they risk overlooking har
 
 ## Proposed validation program
 
-### Phase 0: Define the measurement contract
+### Phase 0: Completed measurement contract and dry run
 
-Before running a study, draft a concise statement of what `check_tor` currently claims.
+Issue #32 completed this phase on 2026-08-30. Its authoritative measurement
+contract and per-case procedure are in
+[VALIDATION-PROTOCOL.md](VALIDATION-PROTOCOL.md); the governance policy,
+endpoint catalog, and sanitized procedural evidence are linked from the status
+note above. The pre-dry-run rationale below is retained as planning history,
+not as an alternative live procedure.
+
+The work began by drafting a concise statement of what `check_tor` claims:
 
 A plausible starting point is:
 
 > `check_tor` measures how a site responds to automated HTTP requests over Tor. For persistent block-like results, it compares that response with an automated non-Tor request and identifies cases where the Tor client is treated worse. Its verdicts approximate, but do not reproduce, a human Tor Browser user’s experience.
 
-Tasks:
+Completed preparation:
 
 - Review every verdict description in the README.
 - Separate direct observations from inferences.
@@ -187,11 +195,16 @@ Tasks:
   control. The corresponding command-line settings may be frozen explicitly;
   the HTTP request profile and 1 MiB response inspection cap remain fixed.
 
-**Output:** a one-page measurement contract and a frozen pilot protocol.
+**Completed output:** a governed measurement contract and frozen per-case
+protocol (`TACP-0.2`).
 
-### Phase 1: Run a small manual pilot
+### Phase 1: Stratified manual pilot (issue #33 planning only)
 
-Start manually, not with browser automation.
+Issue #33 is ready for pilot planning, not live collection. Before any case is
+started, its human reviewer must approve a pilot manifest covering the sample
+allocation or stopping rule, endpoints, current environment, order schedule,
+batch plan, private storage, remote-observation mode, and explicit live
+authority. The pilot remains manual rather than browser-automated.
 
 Select roughly 20–30 public cases, deliberately stratified rather than random. Oversample the outcomes most likely to expose disagreement:
 
@@ -270,7 +283,11 @@ The tool should not be modified merely to maximize agreement with a small sample
 
 ## Proposed observation record
 
-The raw study record should be structured enough to compare cases but simple enough for manual use.
+The frozen observation record in
+[VALIDATION-PROTOCOL.md](VALIDATION-PROTOCOL.md) is authoritative for any
+approved collection. The following flat sketch predates the completed dry run
+and is retained as planning history; do not use it in place of the protocol's
+separate browser records and required fields.
 
 Suggested fields:
 
@@ -341,17 +358,22 @@ collection. Raw measurement artifacts must remain outside this repository;
 adding an in-tree study directory to `.gitignore` is not an acceptable
 substitute.
 
-## Planned execution sequence
+## Current execution sequence
 
-The first milestone should be deliberately small.
+### Completed steps 1–4: prepare and dry-run the procedure
 
-### Step 1: Freeze the instrument
+Issue #32 completed the bounded preparation and dry run on 2026-08-30. The
+frozen protocol, governance policy, endpoint catalog, and dry-run note are the
+durable outputs; their current status is summarized at the top of this file.
+The original sequence is retained below to explain the completed work.
+
+#### Step 1: Freeze the instrument
 
 - Record the release, commit SHA, default settings, and supported override settings.
 - Run the complete offline test suite and CI.
 - Avoid unrelated scanner changes during the pilot.
 
-### Step 2: Draft the measurement contract
+#### Step 2: Draft the measurement contract
 
 Write one page answering:
 
@@ -363,7 +385,7 @@ Write one page answering:
 
 Review this against the README before collecting data.
 
-### Step 3: Create the human-observation rubric and form
+#### Step 3: Create the human-observation rubric and form
 
 - Turn the proposed fields above into a simple Markdown or spreadsheet form.
 - Define “normal,” “friction,” “severely degraded,” “blocked,” and “inconclusive.”
@@ -372,13 +394,14 @@ Review this against the README before collecting data.
 - Decide the number of Tor identities or attempts.
 - Decide the maximum time per case.
 
-### Step 4: Run a five-case dry run
+#### Step 4: Run a five-case dry run
 
 Completed on 2026-08-30 under `TACP-0.1`. See the sanitized
 [dry-run procedural record](VALIDATION-DRY-RUN.md). The resulting single
 revision, `TACP-0.2`, was accepted and frozen for issue #33 on 2026-08-30.
 
-Choose five deliberately public cases representing different verdicts. The purpose is not to draw conclusions. It is to find procedural problems:
+The five deliberately public cases represented different verdicts. Their purpose
+was not to draw conclusions, but to find procedural problems:
 
 - Is the rubric understandable?
 - Can observations be completed consistently?
@@ -388,9 +411,14 @@ Choose five deliberately public cases representing different verdicts. The purpo
 - Are screenshots or raw logs actually necessary?
 - Can the process be repeated without creating excessive traffic?
 
-Revise the protocol once after the dry run, then freeze it for the pilot.
+The protocol was revised once after the dry run and then frozen for issue #33.
 
 ### Step 5: Run the 20–30 case manual pilot
+
+Do not begin this step until the issue #33 pilot manifest is human-approved and
+separate live authority is granted. The frozen protocol governs each case; the
+manifest supplies the experiment-level sampling, endpoint, environment, and
+batch decisions it deliberately does not fix.
 
 - Use a stratified sample.
 - Alternate or randomize scanner/browser order.
