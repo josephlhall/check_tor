@@ -1,10 +1,16 @@
 # Reference Endpoints for Tor Access Comparison
 
-> **Status:** DRY RUN COMPLETED — CATALOG REMAINS GOVERNED<br>
-> **Live observations:** Five issue #32 cases completed on 2026-08-30; private
-> rows are not published in this catalog<br>
+> **Status:** PILOT COLLECTION COMPLETE — CATALOG REMAINS GOVERNED
+>
+> **Live observations:** Five issue #32 dry-run cases and 26 issue #33 pilot
+> cases completed; private rows are not published in this catalog
+>
 > **Dry-run selection:** Five documented public test cases approved by the
-> owner on 2026-08-29 and completed under `TACP-0.1`<br>
+> owner on 2026-08-29 and completed under `TACP-0.1`
+>
+> **Pilot selection:** 26 cases governed by the separately approved
+> [issue #33 manifest](VALIDATION-PILOT-MANIFEST.md) under `TACP-0.2`
+>
 > **Private targets:** Prohibited from this public file
 
 This catalog defines how candidate and reference endpoints are described for
@@ -300,12 +306,13 @@ entry had:
 - a replacement rule that requires human approval rather than silent
   substitution.
 
-The five selected cases are recorded above because they are deliberately public
-and safe to name. For issue #33, do not treat their prior approval as an
-approved pilot list: each candidate must appear in the human-approved pilot
-manifest with current verification, an authorization and publication-sensitivity
-decision, an interaction limit, and a preassigned order/batch slot. That
-manifest and separate live authority remain required before collection.
+The five dry-run cases are recorded above because they are deliberately public
+and safe to name. For issue #33, an entry became a pilot case only through the
+human-approved [pilot manifest](VALIDATION-PILOT-MANIFEST.md), with current
+verification, an authorization and publication-sensitivity decision, an
+interaction limit, and a preassigned order/batch slot. Catalog inclusion alone
+never authorized traffic. Future collection still requires a new approved
+scope and separate live authority.
 
 ## Sources
 
@@ -315,4 +322,5 @@ manifest and separate live authority remain required before collection.
 - [httpbin project](https://github.com/postmanlabs/httpbin)
 - [Tor Access Comparison Protocol](VALIDATION-PROTOCOL.md)
 - [Ethics and data stewardship](ETHICS-AND-DATA-STEWARDSHIP.md)
+- [Issue #33 pilot calibration results](VALIDATION-PILOT-RESULTS.md)
 - [`targets-EXAMPLE.txt`](targets-EXAMPLE.txt)

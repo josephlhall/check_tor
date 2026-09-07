@@ -1,20 +1,28 @@
 # Tor Access Comparison Protocol
 
-> **Status:** FROZEN FOR ISSUE #33<br>
-> **Protocol ID:** TACP-0.2<br>
-> **Dry-run approval:** Joseph Lorenzo Hall, 2026-08-30 (`TACP-0.1`)<br>
-> **Intended use:** Methodological basis for issue #33; a human-approved pilot
-> manifest and explicit live authority are still required<br>
+> **Status:** FROZEN FOR ISSUE #33
+>
+> **Protocol ID:** TACP-0.2
+>
+> **Dry-run approval:** Joseph Lorenzo Hall, 2026-08-30 (`TACP-0.1`)
+>
+> **Intended use:** Methodological basis for the completed issue #33 pilot;
+> every future live use still requires its own human-approved manifest and
+> explicit authority
+>
 > **Scanner baseline:**
-> `fc13260f87c01e56db376858d90d837abcda1eaa`<br>
-> **Human approval:** Joseph Lorenzo Hall, 2026-08-30<br>
+> `fc13260f87c01e56db376858d90d837abcda1eaa`
+>
+> **Human approval:** Joseph Lorenzo Hall, 2026-08-30
+>
 > **Operational fields:** Resolved at preflight on 2026-08-30
 
 This document is the normative manual protocol for comparing `check_tor`
 observations with browser access outcomes. Revision `TACP-0.1` governed the
 completed issue #32 dry run. The human reviewer accepted this single
-evidence-driven revision as `FROZEN FOR ISSUE #33` on 2026-08-30. That freeze
-does not authorize issue #33 live collection.
+evidence-driven revision as `FROZEN FOR ISSUE #33` on 2026-08-30. Issue #33
+later completed collection under its separately approved manifest and live
+authority; the protocol freeze alone never authorized that traffic.
 
 The ethical and data-handling rules in
 [ETHICS-AND-DATA-STEWARDSHIP.md](ETHICS-AND-DATA-STEWARDSHIP.md) can stop or
@@ -543,7 +551,7 @@ The dry run must not report an accuracy percentage or prevalence estimate.
 | Protocol ID | State | Date | Change summary |
 |---|---|---|---|
 | `TACP-0.1` | Approved and used for the five-case issue #32 dry run | 2026-08-30 | Initial governed procedure and observation schema |
-| `TACP-0.2` | `FROZEN FOR ISSUE #33`; live collection separately authorized | 2026-08-30 | One post-run revision: nested browser records, stable-outcome timing, and explicit action-time timestamp capture |
+| `TACP-0.2` | Frozen and used for issue #33; live authority came from its separate manifest and gates | 2026-08-30 | One post-run revision: nested browser records, stable-outcome timing, and explicit action-time timestamp capture |
 
 The lifecycle is:
 
@@ -565,6 +573,8 @@ protocol revision and must not be applied retroactively to collected cases.
 
 - [`check_tor` measurement roadmap](MEASUREMENT-VALIDATION.md)
 - [Five-case dry-run procedural record](VALIDATION-DRY-RUN.md)
+- [Issue #33 pilot manifest](VALIDATION-PILOT-MANIFEST.md)
+- [Issue #33 pilot calibration results](VALIDATION-PILOT-RESULTS.md)
 - [Ethics and data stewardship](ETHICS-AND-DATA-STEWARDSHIP.md)
 - [Reference endpoint catalog](REFERENCE-ENDPOINTS.md)
 - [Tor Project: using Tor with other browsers](https://support.torproject.org/tor-browser/security/using-tor-with-other-browsers/)

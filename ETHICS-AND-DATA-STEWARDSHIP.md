@@ -1,21 +1,26 @@
 # Ethics and Data Stewardship for Tor Access Comparison
 
-> **Status:** APPROVED GOVERNANCE POLICY<br>
+> **Status:** APPROVED GOVERNANCE POLICY
+>
 > **Applies to:** The five-case issue #32 dry run and any later study using the
-> Tor Access Comparison Protocol<br>
-> **Data steward:** Joseph Lorenzo Hall<br>
-> **Incident owner:** Joseph Lorenzo Hall<br>
+> Tor Access Comparison Protocol
+>
+> **Data steward:** Joseph Lorenzo Hall
+>
+> **Incident owner:** Joseph Lorenzo Hall
+>
 > **Contact, opt-out, and incident reports:**
-> [joehall@gmail.com](mailto:joehall@gmail.com)<br>
+> [joehall@gmail.com](mailto:joehall@gmail.com)
+>
 > **Storage and retention:** Local owner-only root established, excluded from
 > Time Machine, with retention schedule approved
 
 This document is the public ethical-measurement pledge and normative
 data-stewardship policy for the `check_tor` access comparison. It governs
 [VALIDATION-PROTOCOL.md](VALIDATION-PROTOCOL.md) and can prohibit or halt a
-protocol step. The policy governed the completed issue #32 dry run and remains
-in force, but it does not by itself authorize issue #33 or any other live
-collection.
+protocol step. The policy governed the completed issue #32 dry run and issue
+#33 pilot. It did not by itself authorize either run; each live collection
+required its own approved scope and explicit authority.
 
 ## Public-interest purpose
 
@@ -212,19 +217,19 @@ copy as a restricted artifact and minimize it during incident handling.
 
 ## Storage, access, and retention
 
-This study uses one private study-data root with separate `structured/` and
-`raw/` directories. No live observation may start until the storage and backup
-decisions below are complete.
+Each approved study uses one private study-data root with separate `structured/`
+and `raw/` directories. No live observation may start until the run's storage
+and backup decisions are complete.
 
 | Decision | Approved value |
 |---|---|
 | Responsible person | Joseph Lorenzo Hall |
-| Private study-data root | `/Users/josephhall/Library/Application Support/check_tor/issue-32` |
+| Private study-data root | Issue-specific owner-only path recorded in the approved private environment record, not in public results |
 | Directory protection | Owner-only (`0700`) root, `structured/`, and `raw/`; outside Git and the repository |
 | Access | Joseph Lorenzo Hall only, unless another person is named before collection |
 | Restricted raw-artifact deletion | After the structured row is audited and no later than 30 days after collection; approved 2026-08-29 |
 | Structured-observation deletion | Delete or formally extend within 90 days after the issue #33 review closes; approved 2026-08-29 |
-| Backup behavior | Time Machine reports the study root as excluded; verified 2026-08-29 |
+| Backup behavior | The issue #32 root was verified excluded on 2026-08-29; every later issue-specific root requires fresh exclusion verification before live collection |
 
 The approved root must not be publicly accessible or broadly shared. Use the
 device's normal account and volume protection and owner-only file permissions.
@@ -318,3 +323,4 @@ protocol changes, and publication.
 - [`check_tor` measurement roadmap](MEASUREMENT-VALIDATION.md)
 - [Tor Access Comparison Protocol](VALIDATION-PROTOCOL.md)
 - [Reference endpoint catalog](REFERENCE-ENDPOINTS.md)
+- [Issue #33 pilot calibration results](VALIDATION-PILOT-RESULTS.md)
