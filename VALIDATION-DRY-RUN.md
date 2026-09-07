@@ -1,11 +1,17 @@
 # Tor Access Comparison Protocol: Five-Case Dry Run
 
-> **Status:** ACCEPTED<br>
-> **Evidence protocol:** `TACP-0.1`<br>
-> **Frozen protocol:** `TACP-0.2`<br>
-> **Scanner commit:** `fc13260f87c01e56db376858d90d837abcda1eaa`<br>
-> **Human reviewer and observer:** Joseph Lorenzo Hall<br>
-> **Observation date:** 2026-08-30<br>
+> **Status:** ACCEPTED
+>
+> **Evidence protocol:** `TACP-0.1`
+>
+> **Frozen protocol:** `TACP-0.2`
+>
+> **Scanner commit:** `fc13260f87c01e56db376858d90d837abcda1eaa`
+>
+> **Human reviewer and observer:** Joseph Lorenzo Hall
+>
+> **Observation date:** 2026-08-30
+>
 > **Freeze accepted:** Joseph Lorenzo Hall, 2026-08-30
 
 This note records procedural evidence from the issue #32 dry run. It does not

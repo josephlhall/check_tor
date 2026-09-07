@@ -1,17 +1,22 @@
 # Validating the `check_tor` Measurement Model
 
 > **Status:** Research roadmap; issue #32 completed the protocol freeze and
-> five-case dry run, but no calibration findings are established. The closed
+> five-case dry run. Issue #33 completed a deliberately stratified 26-case
+> pilot, private analysis, human-reviewed public calibration note, and final
+> repository baseline-parity proof. The closed
 > protocol work is tracked in
 > [issue #32](https://github.com/josephlhall/check_tor/issues/32), and the
-> open, planning-only stratified pilot is tracked in
+> completed pilot and follow-up are tracked in
 > [issue #33](https://github.com/josephlhall/check_tor/issues/33).
 > The governed protocol packet and sanitized dry-run evidence are in
 > [VALIDATION-PROTOCOL.md](VALIDATION-PROTOCOL.md),
 > [ETHICS-AND-DATA-STEWARDSHIP.md](ETHICS-AND-DATA-STEWARDSHIP.md), and
 > [REFERENCE-ENDPOINTS.md](REFERENCE-ENDPOINTS.md), with procedural evidence in
-> [VALIDATION-DRY-RUN.md](VALIDATION-DRY-RUN.md). `TACP-0.2` is frozen for issue
-> #33, but the freeze does not authorize other live measurement.
+> [VALIDATION-DRY-RUN.md](VALIDATION-DRY-RUN.md), with the pilot design in
+> [VALIDATION-PILOT-MANIFEST.md](VALIDATION-PILOT-MANIFEST.md) and aggregate
+> findings in [VALIDATION-PILOT-RESULTS.md](VALIDATION-PILOT-RESULTS.md).
+> `TACP-0.2` remains frozen; the completed pilot does not authorize other live
+> measurement.
 > **Purpose:** Define what `check_tor` can legitimately claim, compare its verdicts with practical access in Tor Browser, and improve interpretation before adding more product features.
 > **Scope:** Methodology and calibration, not a promise of validated accuracy.
 
@@ -198,15 +203,16 @@ Completed preparation:
 **Completed output:** a governed measurement contract and frozen per-case
 protocol (`TACP-0.2`).
 
-### Phase 1: Stratified manual pilot (issue #33 planning only)
+### Phase 1: Completed stratified manual pilot (issue #33)
 
-Issue #33 is ready for pilot planning, not live collection. Before any case is
-started, its human reviewer must approve a pilot manifest covering the sample
-allocation or stopping rule, endpoints, current environment, order schedule,
-batch plan, private storage, remote-observation mode, and explicit live
-authority. The pilot remains manual rather than browser-automated.
+Issue #33 completed 26 manually observed cases on 2026-09-07 under its
+human-approved [pilot manifest](VALIDATION-PILOT-MANIFEST.md), separate live
+authority, and `TACP-0.2`. The aggregate evidence and interpretation limits are
+in [VALIDATION-PILOT-RESULTS.md](VALIDATION-PILOT-RESULTS.md). No browser
+automation or scanner change entered the pilot.
 
-Select roughly 20–30 public cases, deliberately stratified rather than random. Oversample the outcomes most likely to expose disagreement:
+The accepted design selected roughly 20–30 public cases, deliberately
+stratified rather than random. It sought outcomes likely to expose disagreement:
 
 - several `PASS` cases;
 - several `CHALLENGE` cases;
@@ -217,7 +223,7 @@ Select roughly 20–30 public cases, deliberately stratified rather than random.
 
 A random Internet sample would probably yield many ordinary passes and teach little about calibration. The pilot is an instrument study, not a prevalence estimate.
 
-For each case:
+For each case, the frozen procedure required the reviewer to:
 
 1. Record the case and environment metadata.
 2. Run `check_tor` using the frozen configuration and JSONL output.
@@ -228,7 +234,8 @@ For each case:
 7. Write a short causal hypothesis for any disagreement.
 8. Mark uncertainty explicitly.
 
-**Output:** a small calibration table and a set of disagreement case notes.
+**Completed output:** an aggregate calibration table and reviewed disagreement
+interpretations in [VALIDATION-PILOT-RESULTS.md](VALIDATION-PILOT-RESULTS.md).
 
 ### Phase 2: Build controlled reference cases
 
@@ -413,20 +420,20 @@ was not to draw conclusions, but to find procedural problems:
 
 The protocol was revised once after the dry run and then frozen for issue #33.
 
-### Step 5: Run the 20–30 case manual pilot
+### Completed step 5: Run the 20–30 case manual pilot
 
-Do not begin this step until the issue #33 pilot manifest is human-approved and
-separate live authority is granted. The frozen protocol governs each case; the
-manifest supplies the experiment-level sampling, endpoint, environment, and
-batch decisions it deliberately does not fix.
+The human-approved issue #33 manifest supplied the experiment-level sampling,
+endpoint, environment, and batch decisions that the frozen protocol does not
+fix. Collection stopped after 26 includable cases when the frozen stratum
+targets were satisfied.
 
-- Use a stratified sample.
-- Alternate or randomize scanner/browser order.
-- Keep paired observations close in time.
-- Record uncertainty and protocol deviations.
-- Investigate disagreements, but do not change the scanner mid-pilot.
+- The sample was stratified.
+- Scanner/browser order was preassigned and balanced.
+- Paired observations remained within the frozen window.
+- Uncertainty and protocol deviations remained visible.
+- Disagreements were reviewed without changing the scanner mid-pilot.
 
-### Step 6: Review disagreements before writing code
+### Completed step 6: Review disagreements before writing code
 
 Group disagreements by likely mechanism:
 
@@ -439,7 +446,12 @@ Group disagreements by likely mechanism:
 - classification bug;
 - documentation overclaim.
 
-Decide separately whether each pattern calls for:
+The private review found one medium-confidence scanner-optimistic case, no
+scanner-pessimistic case, and five inconclusive comparisons. It retained
+client-dependent and exit-dependent explanations as competing hypotheses and
+found no basis for a scanner code change from this pilot alone.
+
+The review considered separately whether each pattern calls for:
 
 - no change;
 - clearer documentation;
@@ -448,9 +460,11 @@ Decide separately whether each pattern calls for:
 - a new regression test;
 - a targeted same-exit experiment.
 
-### Step 7: Publish a calibration note
+### Completed step 7: Prepare and review the calibration note
 
-The first useful deliverable should be a short evidence-based note, not a new feature release. It should state:
+The final [pilot calibration results](VALIDATION-PILOT-RESULTS.md) are the first
+evidence-based deliverable rather than a new feature release. Human review and
+repository proof completed on 2026-09-07. The note states:
 
 - what sample was studied;
 - what protocol was used;
@@ -474,6 +488,11 @@ At minimum:
 8. Are there any scanner-optimistic cases?
 9. Which disagreements can be explained without changing the classifier?
 10. Which verdict descriptions should be narrowed or clarified?
+
+The [pilot calibration results](VALIDATION-PILOT-RESULTS.md) answer these
+questions where the selected evidence permits and mark `CHALLENGE`, `DROP`,
+`TIMEOUT`, scanner pessimism, and causal mechanism questions as unresolved where
+the pilot cannot support an answer.
 
 ## What success looks like
 

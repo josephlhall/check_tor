@@ -168,25 +168,29 @@ Git or place it under a publicly accessible path.
 ## Measurement limitations and validation
 
 `check_tor` measures how sites respond to automated `curl` requests over Tor;
-its verdicts are not validated claims about practical access in Tor Browser. It
-does not reproduce Tor Browser's TLS and browser fingerprint, JavaScript,
-cookies, session state, or interactive challenge behavior. The completed
-five-case dry run established the governed procedure; the next methodological
-stage is the stratified manual pilot in issue #33, after its human-approved
-pilot manifest and explicit live-collection authority. See
-[MEASUREMENT-VALIDATION.md](MEASUREMENT-VALIDATION.md) for the current research
-plan. The governed protocol packet and sanitized five-case procedural record
-are available in the
+its verdicts are not guarantees about practical access in Tor Browser. It does
+not reproduce Tor Browser's TLS and browser fingerprint, JavaScript, cookies,
+session state, or interactive challenge behavior.
+
+A deliberately stratified 26-case manual pilot under `TACP-0.2` produced
+initial calibration evidence: 20 strong agreements, one scanner-optimistic
+case, and five inconclusive comparisons. Those selected, repeated cases are not
+an accuracy score or prevalence estimate. See the sanitized
+[pilot calibration results](VALIDATION-PILOT-RESULTS.md) and
+[MEASUREMENT-VALIDATION.md](MEASUREMENT-VALIDATION.md) for interpretation and
+follow-up. The governed protocol packet and procedural records are available in
+the
 [Tor Access Comparison Protocol](VALIDATION-PROTOCOL.md),
 [ethics and data-stewardship policy](ETHICS-AND-DATA-STEWARDSHIP.md), and
 [reference-endpoint catalog](REFERENCE-ENDPOINTS.md), with dry-run evidence in
-[VALIDATION-DRY-RUN.md](VALIDATION-DRY-RUN.md). `TACP-0.2` is frozen as the
-methodological basis for issue #33, but does not authorize that pilot's live
-collection. The closed
+[VALIDATION-DRY-RUN.md](VALIDATION-DRY-RUN.md) and the issue #33 experiment
+design in [VALIDATION-PILOT-MANIFEST.md](VALIDATION-PILOT-MANIFEST.md).
+`TACP-0.2` remains the methodological basis for the completed pilot; future
+live use requires new approval. The closed
 [issue #32](https://github.com/josephlhall/check_tor/issues/32) tracks the
 protocol freeze and dry run; the open
 [issue #33](https://github.com/josephlhall/check_tor/issues/33) tracks the
-subsequent pilot planning.
+completed pilot and its follow-up.
 
 ## Releases and versioning
 
