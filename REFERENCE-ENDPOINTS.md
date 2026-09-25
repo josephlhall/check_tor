@@ -17,11 +17,16 @@ This catalog defines how candidate and reference endpoints are described for
 the manual access-comparison protocol. It is not a target list, a claim about
 current site policy, or permission to measure an endpoint.
 
+The [issue #39 reference preparation packet](VALIDATION-REFERENCE-PACKET.md)
+specifies five prospective behavior conditions and their feasibility
+dispositions. Its condition IDs are planning labels, not newly verified
+catalog entries or authority for traffic.
+
 Every live case must also satisfy
 [ETHICS-AND-DATA-STEWARDSHIP.md](ETHICS-AND-DATA-STEWARDSHIP.md) and be approved
-under [VALIDATION-PROTOCOL.md](VALIDATION-PROTOCOL.md). Catalog expectations
-never override current observation, operator contact, a lower interaction
-limit, or a safety stop.
+under its governing protocol and a separate live manifest. Catalog
+expectations never override current observation, operator contact, a lower
+interaction limit, or a safety stop.
 
 ## Why the dimensions are separate
 
