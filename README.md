@@ -185,12 +185,14 @@ the
 [reference-endpoint catalog](REFERENCE-ENDPOINTS.md), with dry-run evidence in
 [VALIDATION-DRY-RUN.md](VALIDATION-DRY-RUN.md) and the issue #33 experiment
 design in [VALIDATION-PILOT-MANIFEST.md](VALIDATION-PILOT-MANIFEST.md).
-`TACP-0.2` remains the methodological basis for the completed pilot; future
-live use requires new approval. The closed
+The [prospective reference protocol](VALIDATION-REFERENCE-PROTOCOL.md) and
+[preparation packet](VALIDATION-REFERENCE-PACKET.md) record issue #39's
+owner-approved methodological preparation; they grant no live authority.
+`TACP-0.2` remains the methodological basis for the completed pilot. The closed
 [issue #32](https://github.com/josephlhall/check_tor/issues/32) tracks the
-protocol freeze and dry run; the open
-[issue #33](https://github.com/josephlhall/check_tor/issues/33) tracks the
-completed pilot and its follow-up.
+protocol freeze and dry run; [issue #33](https://github.com/josephlhall/check_tor/issues/33)
+tracks the completed pilot; [issue #39](https://github.com/josephlhall/check_tor/issues/39)
+tracks the prospective preparation.
 
 ## Releases and versioning
 

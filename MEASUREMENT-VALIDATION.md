@@ -241,6 +241,15 @@ interpretations in [VALIDATION-PILOT-RESULTS.md](VALIDATION-PILOT-RESULTS.md).
 
 Real sites provide ecological realism but rarely reveal the mechanism with certainty. Controlled endpoints can test whether the scanner recognizes conditions intentionally created by the operator.
 
+Issue #39 first prepares a [prospective reference protocol](VALIDATION-REFERENCE-PROTOCOL.md)
+and [experiment packet](VALIDATION-REFERENCE-PACKET.md) for normal navigation,
+intelligible HTTP 202 semantics, an authorized challenge, client-dependent
+refusal, and Tor-versus-clearnet difference. The owner approved the preparation
+packet on 2026-09-25; it is not a live collection plan. Conditions requiring
+construction or permission may remain deferred. Endpoint construction, screening, and
+collection require separate work and authorization; the issue #33 pilot
+protocol and results remain historical.
+
 Potential controlled behaviors include:
 
 - ordinary success over Tor and non-Tor;
