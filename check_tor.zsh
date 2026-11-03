@@ -248,7 +248,8 @@ probe() {
     # endless bodies are bounded too. curl may then report a write error after
     # head closes the pipe; probe_body_limited distinguishes that intentional
     # cutoff from an unrelated destination failure.
-    out=$(curl -s -o >(head -c "$MAX_BODY_BYTES" > "$BODY") \
+    # Ignore ambient curlrc credentials and TLS/request overrides. Keep -q first.
+    out=$(curl -q -s -o >(head -c "$MAX_BODY_BYTES" > "$BODY") \
         -D "$HDRS" -L --max-redirs 10 \
         -A "$USER_AGENT" -H "$ACCEPT_HDR" -H "$LANG_HDR" \
         "${via[@]}" --max-time "$3" \
@@ -466,7 +467,7 @@ tor_preflight() {
     fi
     # This checks more than whether a SOCKS port accepts connections: Tor's service
     # confirms that the request emerged from its network and reports the exit IP.
-    tor_check=$(curl -s --socks5-hostname "$TOR_PROXY" --max-time 10 https://check.torproject.org/api/ip)
+    tor_check=$(curl -q -s --socks5-hostname "$TOR_PROXY" --max-time 10 https://check.torproject.org/api/ip)
 
     if [[ "$tor_check" == *'"IsTor":true'* ]]; then
         exit_ip=${tor_check#*\"IP\":\"} exit_ip=${exit_ip%%\"*}
