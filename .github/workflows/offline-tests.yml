@@ -116,6 +116,72 @@ jobs:
             fi
           done
 
+      - name: Verify checkout Git trust before checkout
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          python3 - <<'PYGITTRUST'
+          import os
+          import re
+          import shutil
+          import subprocess
+          import tempfile
+
+          HOSTS = (
+              "dv-g3b-emudhra.we-have-a-problem.com",
+              "dv-g3b-aaa-emudhra.we-have-a-problem.com",
+              "dv-g3b-noct-emudhra.we-have-a-problem.com",
+              "dv-g3b-aaa-noct-emudhra.we-have-a-problem.com",
+          )
+
+          def main():
+              # Resolve the same PATH Git as checkout, including Homebrew Git.
+              git = shutil.which("git")
+              if not git:
+                  raise SystemExit("Checkout Git is unavailable; trust is unproven")
+              with tempfile.TemporaryDirectory(prefix="check-tor-git-trust-") as directory:
+                  # An empty working directory/home plus an allowlisted environment
+                  # prevents local/global configs, netrc, askpass, headers, URL
+                  # rewrites and proxy credentials from reaching the test hosts.
+                  env = {key: os.environ[key] for key in (
+                      "PATH", "GIT_SSL_CAINFO", "GIT_SSL_CAPATH", "SSL_CERT_FILE", "SSL_CERT_DIR"
+                  ) if key in os.environ}
+                  env.update({
+                      "HOME": directory, "LC_ALL": "C", "GIT_TERMINAL_PROMPT": "0",
+                      "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_SYSTEM": "/dev/null",
+                      "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_COUNT": "0",
+                      "GIT_ASKPASS": "/usr/bin/false", "SSH_ASKPASS": "/usr/bin/false",
+                  })
+                  command = [git, "-c", "credential.helper=", "-c", "credential.interactive=false",
+                             "-c", "http.extraHeader=", "-c", "http.proxy=", "-c", "http.sslVerify=true",
+                             "-c", "http.followRedirects=false", "-c", "http.lowSpeedLimit=1",
+                             "-c", "http.lowSpeedTime=20", "ls-remote"]
+                  controls = [("https://github.com/git/git.git", False)]
+                  controls.extend((f"https://{host}/check.git", True) for host in HOSTS)
+                  for remote, rejected in controls:
+                      try:
+                          result = subprocess.run(command + [remote, "HEAD"], cwd=directory, env=env,
+                                                  capture_output=True, text=True, timeout=30)
+                      except subprocess.TimeoutExpired:
+                          raise SystemExit(f"Git trust control timed out: {remote}")
+                      if rejected:
+                          # Git uses 128 for DNS, HTTP and authentication failures
+                          # too. Require a certificate-specific diagnostic as well.
+                          valid = result.returncode == 128 and re.search(
+                              rf"^fatal: unable to access ['\"]{re.escape(remote)}/?['\"]: "
+                              r"(?:SSL certificate problem:|certificate verify failed|server certificate verification failed|SSL peer certificate)",
+                              result.stderr, re.I | re.M)
+                      else:
+                          valid = result.returncode == 0
+                      if not valid:
+                          raise SystemExit(f"Git trust control failed: {remote} exit {result.returncode}; "
+                                           + ("expected certificate rejection" if rejected else "positive control failed"))
+              print(f"Checkout Git trust controls passed: {git}; GitHub reachable; all four affected chains rejected")
+
+          if __name__ == "__main__":
+              main()
+          PYGITTRUST
+
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         # GITHUB_ENV forbids NODE_OPTIONS; set it directly for this action.

@@ -241,8 +241,15 @@ excluding the two roots identified by DER SHA-256 in the incident's
 [public root list](https://emudhra.we-have-a-problem.com/roots.json). It exports
 explicit curl, Git, and Python CA paths, selects that OpenSSL store for
 checkout's Node runtime, and requires the positive and four negative controls
-before checkout. It downloads no replacement trust material. GitHub's runner
-provisioning and action acquisition remain provider boundaries outside these
+before checkout. A separate pre-checkout control resolves the same PATH Git
+as checkout (including Homebrew Git), requires a successful public GitHub query,
+and requires certificate-specific rejection of all four incident hosts. These
+Git probes use an empty working directory/home, ignore ambient Git configuration,
+credentials and proxies, and prohibit redirects and interactive authentication.
+They test the exported CA settings; they do not establish that macOS native trust
+or other clients have been repaired. The job fails before checkout if either
+client's controls fail. It downloads no replacement trust material. GitHub's
+runner provisioning and action acquisition remain provider boundaries outside these
 steps. Linux and macOS then check the measurement curl after checkout.
 
 Offline regression checks for the filter and preflight use Python 3, public
@@ -276,7 +283,8 @@ The repository has three complementary suites:
   arguments, and temporary-file cleanup without reaching the network.
 * `tests/test_curl_trust.py` checks the macOS bundle filter against the two
   public affected roots and verifies positive-control and certificate-specific
-  negative-control handling with a fake curl, including connection failures.
+  negative-control handling with fake curl and Git clients, including connection
+  failures and credential/configuration isolation.
 
 Run the complete local validation from the repository root:
 
@@ -293,7 +301,8 @@ A successful run reports passing Zsh checks and a Python unittest `OK` result.
 The **Offline tests** GitHub Actions workflow runs the same syntax and test
 commands on Ubuntu and macOS for every pull request and push to `main`; it can
 also be started manually. Its separate trust qualification steps make the five
-fixed HTTPS control requests before running the offline suites.
+fixed HTTPS curl control requests and, on macOS, five Git control queries before
+running the offline suites.
 
 ## Handling target lists
 
