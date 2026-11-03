@@ -48,7 +48,7 @@ and Debian/Ubuntu installations.
 
 ## Setup
 
-1. Place `check_tor.zsh` somewhere convenient, and copy `targets-EXAMPLE.txt` to create your own list. Keep real target lists **outside** this repository—see [Handling target lists](#handling-target-lists).
+1. Keep `check_tor.zsh`, `check_tor_core.zsh`, and `scripts/` together, and copy `targets-EXAMPLE.txt` to create your own list. Keep real target lists **outside** this repository—see [Handling target lists](#handling-target-lists).
 2. Make the script executable:
    ```zsh
    chmod +x check_tor.zsh
@@ -70,11 +70,35 @@ and Debian/Ubuntu installations.
    emacs ~/tor-targets/mylist.txt
    ```
 
-3. **Run the scanner:**
-   Pass your text file as an argument to the script.
+3. **Qualify curl trust and run the scanner:**
+   Run the explicit trust controls in the same shell and environment as the
+   measurement. Continue only if they pass:
    ```zsh
-   ./check_tor.zsh ~/tor-targets/mylist.txt
+   ./scripts/check-curl-trust.zsh && ./check_tor.zsh ~/tor-targets/mylist.txt
    ```
+
+   This preflight makes five HTTPS requests using current proxy settings: GitHub is the positive
+   control, and four fixed `emudhra.we-have-a-problem.com` subdomains must fail
+   with curl certificate-verification status 60. DNS, proxy, timeout, and other
+   transport failures leave trust unproven and stop the command. It never
+   starts Tor or reads your targets. The scanner does not run these external
+   controls implicitly.
+
+   The check uses the actual `curl` selected by `PATH` and its CA/proxy
+   environment, without substituting a different CA bundle. Both the checker
+   and scanner suppress `.curlrc` with `-q`; ambient cookies, credentials,
+   `insecure`, and request-profile changes from that file are ignored. Configure
+   any intended CA bundle through `CURL_CA_BUNDLE` (and, where relevant,
+   `SSL_CERT_FILE`/`SSL_CERT_DIR`) in the same environment for both commands.
+   Repeat qualification after changing curl, CA files, the host, or that
+   environment. A passing result covers these controls, not all TLS security.
+
+   The [upstream runner-image incident](https://github.com/actions/runner-images/issues/15228)
+   affects macOS system and stale Homebrew trust independently; a Homebrew CA
+   update alone does not repair Apple curl's default trust. Follow
+   [Apple's affected-root guidance](https://support.apple.com/en-us/149555)
+   and verify the curl you will actually use. The checker reports failure
+   without changing host trust.
 
    Exactly one readable target file is required. A file containing only blank
    lines and comments is rejected before the scanner contacts Tor. Run
@@ -209,13 +233,38 @@ Normally publish a GitHub Release for a `check_tor` tag so users and future
 contributors receive a curated change summary; if a tag is intentionally only
 a source checkpoint, record that decision before tagging.
 
+## Trust-control maintenance
+
+The macOS CI job builds a temporary CA bundle from preinstalled Apple/Homebrew
+PEM stores, requiring Apple’s bundle and valid, complete certificates, and
+excluding the two roots identified by DER SHA-256 in the incident's
+[public root list](https://emudhra.we-have-a-problem.com/roots.json). It exports
+explicit curl, Git, and Python CA paths, selects that OpenSSL store for
+checkout's Node runtime, and requires the positive and four negative controls
+before checkout. It downloads no replacement trust material. GitHub's runner
+provisioning and action acquisition remain provider boundaries outside these
+steps. Linux and macOS then check the measurement curl after checkout.
+
+Offline regression checks for the filter and preflight use Python 3, public
+root fixtures, and fake curl responses, without network access. Python 3 is
+needed only for these maintenance tests and CI bootstrap, not scanning. Run
+these with the complete offline validation sequence below.
+
+The public root fixtures in `tests/fixtures/distrusted-roots.pem` are the
+emSign ECC Root CA-G3 and AAA Certificate Services roots, identified against
+the incident root list. `retained-root.pem` is a public root used to exercise
+OpenSSL’s PEM parser offline. These fixtures are test data, never a configured
+CA bundle.
+Hosted execution of these workflow controls is required before claiming the
+runner mitigation has been verified in GitHub Actions.
+
 ## Testing
 
 All tests are deterministic and offline. They use synthetic `.example.test`
 targets and temporary files; they never inspect `targets.txt`, `scans/`, or
 `*.private.txt`. You do not need a running Tor proxy or Internet access.
 
-The repository has two complementary suites:
+The repository has three complementary suites:
 
 * `tests/check_tor_test.zsh` exercises the decision logic directly, including
   curl and HTTP classification, WAF fingerprints, retry eligibility, severity,
@@ -225,21 +274,26 @@ The repository has two complementary suites:
   source-safe loading, target parsing and normalization, circuit retries,
   clearnet controls, validated setting overrides, output summaries, curl
   arguments, and temporary-file cleanup without reaching the network.
+* `tests/test_curl_trust.py` checks the macOS bundle filter against the two
+  public affected roots and verifies positive-control and certificate-specific
+  negative-control handling with a fake curl, including connection failures.
 
 Run the complete local validation from the repository root:
 
 ```zsh
 test -x check_tor.zsh
-zsh -n check_tor.zsh check_tor_core.zsh tests/*.zsh
+zsh -n check_tor.zsh check_tor_core.zsh scripts/*.zsh tests/*.zsh
 zsh tests/check_tor_test.zsh
 zsh tests/check_tor_integration_test.zsh
+python3 -m unittest discover -s tests -p 'test_curl_trust.py'
 git diff --check
 ```
 
-A successful run reports `All 66 offline checks passed.` and
-`All 128 offline integration checks passed.` The **Offline tests** GitHub Actions
-workflow runs the same syntax and test commands on Ubuntu and macOS for every
-pull request and push to `main`; it can also be started manually.
+A successful run reports passing Zsh checks and a Python unittest `OK` result.
+The **Offline tests** GitHub Actions workflow runs the same syntax and test
+commands on Ubuntu and macOS for every pull request and push to `main`; it can
+also be started manually. Its separate trust qualification steps make the five
+fixed HTTPS control requests before running the offline suites.
 
 ## Handling target lists
 

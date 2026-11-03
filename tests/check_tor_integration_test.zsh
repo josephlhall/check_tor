@@ -341,6 +341,8 @@ assert_contains "parse summary total" "Scanned 2 domain(s):" "$scanner_stdout"
 assert_contains "parse summary passes" "2 PASS" "$scanner_stdout"
 assert_not_contains "redirected output has no ANSI" $'\033[' "$scanner_stdout"
 assert_eq "parse probe count" 2 "$(< "$parse_case/curl.state")"
+assert_eq "every request ignores ambient curlrc" 0 \
+    "$(awk 'index($0, "-q ") != 1 { count++ } END { print count + 0 }' "$parse_case/curl.log")"
 assert_eq "parse temporary cleanup" 0 "$(find "$parse_case/scanner-tmp" -type f | wc -l | tr -d ' ')"
 
 explicit_text_case="$TEST_TMP/explicit-text"

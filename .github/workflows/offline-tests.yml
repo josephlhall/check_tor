@@ -23,8 +23,107 @@ jobs:
           - macos-latest
 
     steps:
+      # This must precede checkout: runner-image trust affects checkout itself.
+      # Do not fetch a replacement bundle using the trust store being repaired.
+      - name: Prepare restricted macOS trust before network access
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64
+          import hashlib
+          import os
+          from pathlib import Path
+          import re
+          import ssl
+
+          # Public root DER SHA-256 values from the incident's roots.json.
+          # https://emudhra.we-have-a-problem.com/roots.json
+          blocked = {
+              "86A1ECBA089C4A8D3BBE2734C612BA341D813E043CF9E8A862CD5C57A36BBE6B",
+              "D7A7A0FB5D7E2731D771E9484EBCDEF71D5F0C3E0A2948782BC83EE0EA699EF4",
+          }
+          sources = [
+              Path("/etc/ssl/cert.pem"),
+              Path("/opt/homebrew/etc/ca-certificates/cert.pem"),
+              Path("/usr/local/etc/ca-certificates/cert.pem"),
+          ]
+          if not sources[0].is_file():
+              raise SystemExit("Required Apple CA bundle is missing")
+          destination = Path(os.environ["RUNNER_TEMP"]) / "check-tor-trust"
+          destination.mkdir(mode=0o700, exist_ok=True)
+          capath = destination / "empty-ca-directory"
+          capath.mkdir(mode=0o700, exist_ok=True)
+          certificates = {}
+          removed = set()
+          for source in sources:
+              if not source.is_file():
+                  continue
+              contents = source.read_text()
+              blocks = re.findall(r"-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----", contents, re.S)
+              if (contents.count("-----BEGIN CERTIFICATE-----") != len(blocks)
+                      or contents.count("-----END CERTIFICATE-----") != len(blocks)):
+                  raise SystemExit(f"Incomplete certificate block in {source}")
+              if not blocks:
+                  raise SystemExit(f"No certificates in {source}")
+              for pem in blocks:
+                  der = base64.b64decode("".join(pem.splitlines()[1:-1]), validate=True)
+                  fingerprint = hashlib.sha256(der).hexdigest().upper()
+                  if fingerprint in blocked:
+                      removed.add(fingerprint)
+                  else:
+                      certificates[fingerprint] = pem + "\n"
+          if not certificates:
+              raise SystemExit("Refusing an empty CA bundle")
+          retained = "".join(certificates.values())
+          # Parse retained roots without loading defaults or making connections.
+          ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT).load_verify_locations(cadata=retained)
+          bundle = destination / "cert.pem"
+          bundle.write_text(retained)
+          settings = {
+              "CURL_CA_BUNDLE": bundle,
+              "SSL_CERT_FILE": bundle,
+              "SSL_CERT_DIR": capath,
+              "REQUESTS_CA_BUNDLE": bundle,
+              "GIT_SSL_CAINFO": bundle,
+              "GIT_SSL_CAPATH": capath,
+          }
+          with Path(os.environ["GITHUB_ENV"]).open("a") as environment:
+              for key, value in settings.items():
+                  environment.write(f"{key}={value}\n")
+          print(f"Restricted CA bundle: {len(certificates)} retained, {len(removed)} affected roots removed")
+          PY
+
+      - name: Verify macOS trust before checkout
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          /usr/bin/curl -q --silent --show-error --fail --output /dev/null \
+            --connect-timeout 10 --max-time 20 https://github.com/
+          for host in \
+            dv-g3b-emudhra.we-have-a-problem.com \
+            dv-g3b-aaa-emudhra.we-have-a-problem.com \
+            dv-g3b-noct-emudhra.we-have-a-problem.com \
+            dv-g3b-aaa-noct-emudhra.we-have-a-problem.com; do
+            curl_rc=0
+            /usr/bin/curl -q --silent --show-error --output /dev/null \
+              --connect-timeout 10 --max-time 20 "https://$host/" 2>/dev/null || curl_rc=$?
+            if [[ "$curl_rc" != 60 ]]; then
+              echo "::error::Trust control $host returned curl $curl_rc; expected certificate rejection (60)."
+              exit 1
+            fi
+          done
+
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        # GITHUB_ENV forbids NODE_OPTIONS; set it directly for this action.
+        # Extra CA roots only add trust, so use the restricted OpenSSL store.
+        env:
+          NODE_OPTIONS: ${{ runner.os == 'macOS' && '--use-openssl-ca' || '' }}
+        with:
+          persist-credentials: false
 
       - name: Install zsh on Linux
         if: runner.os == 'Linux'
@@ -32,14 +131,20 @@ jobs:
           sudo apt-get update
           sudo apt-get install --yes zsh
 
+      - name: Verify effective measurement curl trust
+        run: zsh scripts/check-curl-trust.zsh
+
       - name: Verify executable mode
         run: test -x check_tor.zsh
 
       - name: Check zsh syntax
-        run: zsh -n check_tor.zsh check_tor_core.zsh tests/*.zsh
+        run: zsh -n check_tor.zsh check_tor_core.zsh scripts/*.zsh tests/*.zsh
 
       - name: Run offline regression tests
         run: zsh tests/check_tor_test.zsh
 
       - name: Run offline integration tests
         run: zsh tests/check_tor_integration_test.zsh
+
+      - name: Run offline trust-control tests
+        run: python3 -m unittest discover -s tests -p 'test_curl_trust.py'

@@ -560,3 +560,19 @@ Suggested workflow:
 4. Add only protocol or documentation changes where evidence and review support them.
 
 Model output should never replace raw observation. Human review remains the sole final authority for protocol decisions.
+
+## Curl trust qualification
+
+Before new measurements, run `scripts/check-curl-trust.zsh` in the measurement
+shell and require success before invoking the scanner, as described in the
+README. It tests the selected curl and CA environment with one positive and
+four affected-chain negative controls; transport failures do not prove distrust.
+The preflight is separate from Tor measurements and makes no target requests.
+Both commands ignore `.curlrc` to prevent ambient credentials, disabled TLS
+verification, or a changed request profile. Environment CA/proxy settings still
+apply and must remain the same between qualification and measurement.
+
+This is an operational prerequisite for future measurements, not new
+calibration evidence. Existing pilot findings retain their historical runtime
+and protocol context; no live rerun or broader trust validation is established
+by the offline trust-control tests.
