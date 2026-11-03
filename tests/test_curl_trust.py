@@ -1,4 +1,4 @@
-"""Offline checks: all curl traffic is replaced by a deterministic executable."""
+"""Offline checks: curl and Git traffic use deterministic fake executables."""
 import base64
 import contextlib
 import io
@@ -90,6 +90,105 @@ class CurlTrustTests(unittest.TestCase):
         self.assertFalse(self.log.exists())
 
 
+class GitTrustTests(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.temp = Path(self.directory.name)
+        self.log = self.temp / "git-queries.jsonl"
+        self.responses = self.temp / "responses.json"
+        self.responses.write_text("{}")
+        self.fake = self.temp / "git"
+        self.fake.write_text(f"#!{sys.executable}\n" + textwrap.dedent(f"""
+            import json, os, sys
+            from pathlib import Path
+            with open({str(self.log)!r}, "a") as log:
+                log.write(json.dumps({{"argv": sys.argv[1:], "env": dict(os.environ), "cwd": os.getcwd()}}) + "\\n")
+            remote = sys.argv[-2]
+            response = json.loads(Path({str(self.responses)!r}).read_text()).get(remote)
+            if response is None:
+                response = [0, ""] if remote.startswith("https://github.com/") else [
+                    128, f"fatal: unable to access '{{remote}}/': SSL certificate problem: unable to get local issuer certificate"]
+            print(response[1], file=sys.stderr)
+            sys.exit(response[0])
+        """))
+        self.fake.chmod(0o755)
+        workflow = (ROOT / ".github/workflows/offline-tests.yml").read_text()
+        source = textwrap.dedent(workflow.split("          python3 - <<'PYGITTRUST'\n", 1)[1]
+                                 .split("          PYGITTRUST\n", 1)[0])
+        self.guard = {"__name__": "git_trust_test"}
+        exec(compile(source, "workflow Git trust controls", "exec"), self.guard)
+        self.environment = {
+            "PATH": str(self.temp) + os.pathsep + os.environ["PATH"],
+            "GIT_SSL_CAINFO": str(self.temp / "cert.pem"), "GIT_SSL_CAPATH": str(self.temp / "empty"),
+            "SSL_CERT_FILE": str(self.temp / "cert.pem"), "SSL_CERT_DIR": str(self.temp / "empty"),
+            "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "http.extraHeader", "GIT_CONFIG_VALUE_0": "synthetic",
+            "GIT_SSL_NO_VERIFY": "1", "GIT_EXEC_PATH": "synthetic", "HTTPS_PROXY": "synthetic",
+            "https_proxy": "synthetic", "ALL_PROXY": "synthetic", "GIT_ASKPASS": "synthetic",
+        }
+
+    def run_guard(self):
+        with patch.dict(os.environ, self.environment), contextlib.redirect_stdout(io.StringIO()):
+            self.guard["main"]()
+
+    def test_selected_git_rejects_all_chains_without_ambient_credentials_or_config(self):
+        self.run_guard()
+        calls = [json.loads(line) for line in self.log.read_text().splitlines()]
+        self.assertEqual([call["argv"][-2] for call in calls],
+                         ["https://github.com/git/git.git", *[f"https://{host}/check.git" for host in HOSTS]])
+        for call in calls:
+            env, argv = call["env"], call["argv"]
+            self.assertEqual(env["GIT_SSL_CAINFO"], self.environment["GIT_SSL_CAINFO"])
+            self.assertEqual(env["GIT_SSL_CAPATH"], self.environment["GIT_SSL_CAPATH"])
+            self.assertEqual(env["GIT_CONFIG_GLOBAL"], "/dev/null")
+            self.assertEqual(env["GIT_CONFIG_SYSTEM"], "/dev/null")
+            self.assertEqual(env["GIT_CONFIG_COUNT"], "0")
+            self.assertEqual(env["GIT_TERMINAL_PROMPT"], "0")
+            self.assertEqual(env["GIT_ASKPASS"], "/usr/bin/false")
+            self.assertEqual(Path(env["HOME"]).resolve(), Path(call["cwd"]).resolve())
+            self.assertNotEqual(env["HOME"], os.environ["HOME"])
+            for key in ("GIT_SSL_NO_VERIFY", "GIT_EXEC_PATH", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0",
+                        "HTTPS_PROXY", "https_proxy", "ALL_PROXY"):
+                self.assertNotIn(key, env)
+            for setting in ("credential.helper=", "http.extraHeader=", "http.proxy=", "http.sslVerify=true",
+                            "http.followRedirects=false"):
+                self.assertIn(setting, argv)
+            self.assertEqual(argv[-1], "HEAD")
+
+    def test_acceptance_and_noncertificate_errors_fail_closed(self):
+        for host in HOSTS:
+            remote = f"https://{host}/check.git"
+            for code, diagnostic in ((0, ""), (128, "Could not resolve host"), (128, "Failed to connect"),
+                                     (128, "Authentication failed"), (128, "The requested URL returned error: 404"),
+                                     (128, "The requested URL returned error: 302"),
+                                     (128, "remote: SSL certificate problem: spoofed server text"),
+                                     (128, f"remote: fatal: unable to access '{remote}': SSL certificate problem: spoofed"),
+                                     (1, f"fatal: unable to access '{remote}': SSL certificate problem: issuer")):
+                with self.subTest(host=host, code=code, diagnostic=diagnostic):
+                    self.responses.write_text(json.dumps({remote: [code, diagnostic]}))
+                    with self.assertRaisesRegex(SystemExit, "expected certificate rejection"):
+                        self.run_guard()
+
+    def test_positive_failure_and_timeouts_are_not_rejection(self):
+        self.responses.write_text(json.dumps({"https://github.com/git/git.git": [128, "SSL certificate problem"]}))
+        with self.assertRaisesRegex(SystemExit, "positive control failed"):
+            self.run_guard()
+        with patch.object(self.guard["subprocess"], "run", side_effect=subprocess.TimeoutExpired("git", 30)):
+            with self.assertRaisesRegex(SystemExit, "timed out"):
+                self.run_guard()
+
+    def test_gnutls_certificate_diagnostic_is_accepted(self):
+        remote = f"https://{HOSTS[0]}/check.git"
+        self.responses.write_text(json.dumps({remote: [128, f"fatal: unable to access '{remote}/': server certificate verification failed. CAfile: test"]}))
+        self.run_guard()
+
+    def test_missing_git_refuses_without_queries(self):
+        with patch.object(self.guard["shutil"], "which", return_value=None):
+            with self.assertRaisesRegex(SystemExit, "Git is unavailable"):
+                self.run_guard()
+        self.assertFalse(self.log.exists())
+
+
 class BootstrapTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
@@ -155,7 +254,8 @@ class BootstrapTests(unittest.TestCase):
         self.assertFalse(self.environment_file.exists())
 
     def test_bootstrap_and_negative_controls_precede_checkout(self):
-        names = ["Prepare restricted macOS trust", "Verify macOS trust before checkout", "Check out repository"]
+        names = ["Prepare restricted macOS trust", "Verify macOS trust before checkout",
+                 "Verify checkout Git trust before checkout", "Check out repository"]
         offsets = [self.workflow.index(name) for name in names]
         self.assertEqual(offsets, sorted(offsets))
         self.assertIn("NODE_OPTIONS: ${{ runner.os == 'macOS' && '--use-openssl-ca' || '' }}", self.workflow)
