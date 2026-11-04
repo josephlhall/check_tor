@@ -265,13 +265,27 @@ CA bundle.
 Hosted execution of these workflow controls is required before claiming the
 runner mitigation has been verified in GitHub Actions.
 
+A separate [default-trust workflow](.github/workflows/macos-tls-defaults.yml)
+checks the runner's preinstalled TLS clients without checkout, installation,
+CA overrides, or trust repair. It runs manually or for pull requests that change
+its workflow or offline tests. It checks Apple clients, clients selected by PATH,
+and installed standard Homebrew clients, recording the runner image and client
+versions. Every client must reach the positive control and reject all four
+incident chains; acceptance and inconclusive network failures fail the run.
+Results continue to be collected after individual failures.
+
+Keep the ordinary workflow's mitigations until successful default-trust evidence
+for the relevant image and clients supports a separate review of their removal.
+The dedicated workflow's scoped result does not establish that every client or
+GitHub's earlier runner/action acquisition boundary is repaired.
+
 ## Testing
 
-All tests are deterministic and offline. They use synthetic `.example.test`
-targets and temporary files; they never inspect `targets.txt`, `scans/`, or
+The regression suites are deterministic and offline. They use synthetic
+`.example.test` targets and temporary files; they never inspect `targets.txt`, `scans/`, or
 `*.private.txt`. You do not need a running Tor proxy or Internet access.
 
-The repository has three complementary suites:
+The repository has four complementary suites:
 
 * `tests/check_tor_test.zsh` exercises the decision logic directly, including
   curl and HTTP classification, WAF fingerprints, retry eligibility, severity,
@@ -285,6 +299,8 @@ The repository has three complementary suites:
   public affected roots and verifies positive-control and certificate-specific
   negative-control handling with fake curl and Git clients, including connection
   failures and credential/configuration isolation.
+* `tests/macos_tls_defaults_test.py` validates the separate default-trust probe
+  offline, without contacting control hosts or modifying trust stores.
 
 Run the complete local validation from the repository root:
 
@@ -294,6 +310,7 @@ zsh -n check_tor.zsh check_tor_core.zsh scripts/*.zsh tests/*.zsh
 zsh tests/check_tor_test.zsh
 zsh tests/check_tor_integration_test.zsh
 python3 -m unittest discover -s tests -p 'test_curl_trust.py'
+python3 -m unittest discover -s tests -p 'macos_tls_defaults_test.py'
 git diff --check
 ```
 
