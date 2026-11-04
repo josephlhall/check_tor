@@ -1,0 +1,263 @@
+name: macOS default TLS trust
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/macos-tls-defaults.yml
+      - tests/macos_tls_defaults_test.py
+
+permissions: {}
+
+jobs:
+  defaults:
+    name: Unmodified macOS TLS clients
+    runs-on: macos-latest
+    timeout-minutes: 7
+    steps:
+      - name: Probe default trust without checkout or repair
+        shell: /usr/bin/python3 -I -S {0}
+        run: |
+          """Observe unmodified macOS client trust without credentials or CA overrides."""
+          import concurrent.futures
+          import json
+          import os
+          from pathlib import Path
+          import platform
+          import re
+          import shutil
+          import signal
+          import subprocess
+          import sys
+          import tempfile
+          import time
+
+          BAD_HOSTS = (
+              "dv-g3b-emudhra.we-have-a-problem.com",
+              "dv-g3b-aaa-emudhra.we-have-a-problem.com",
+              "dv-g3b-noct-emudhra.we-have-a-problem.com",
+              "dv-g3b-aaa-noct-emudhra.we-have-a-problem.com",
+          )
+          APPLE = {"curl": "/usr/bin/curl", "git": "/usr/bin/git", "python": "/usr/bin/python3"}
+
+
+          def clean_environment(directory, path):
+              # Construct, never copy, the child environment. In particular no CA, proxy,
+              # tracing, injected Git config, Python startup or authentication values pass.
+              return {"PATH": path, "HOME": str(directory), "CURL_HOME": str(directory),
+                      "XDG_CONFIG_HOME": str(directory), "TMPDIR": str(directory), "LC_ALL": "C",
+                      "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_SYSTEM": os.devnull,
+                      "GIT_CONFIG_GLOBAL": os.devnull, "GIT_TERMINAL_PROMPT": "0",
+                      "GIT_ASKPASS": "/usr/bin/false", "SSH_ASKPASS": "/usr/bin/false",
+                      "GIT_CEILING_DIRECTORIES": str(directory)}
+
+
+          def run(arguments, env, directory, deadline):
+              remaining = min(12, deadline - time.monotonic())
+              if remaining <= 0:
+                  return {"returncode": None, "error": "budget_exhausted"}
+              try:
+                  child = subprocess.Popen(arguments, env=env, cwd=directory,
+                                           stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                           stderr=subprocess.PIPE, text=True, start_new_session=True)
+              except OSError:
+                  return {"returncode": None, "error": "client_unavailable"}
+              try:
+                  stdout, stderr = child.communicate(timeout=remaining)
+              except subprocess.TimeoutExpired:
+                  # Git may own a remote helper. Reap the whole private group on deadline.
+                  try:
+                      os.killpg(child.pid, signal.SIGKILL)
+                  except ProcessLookupError:
+                      pass
+                  child.communicate()
+                  return {"returncode": None, "error": "deadline"}
+              return {"returncode": child.returncode, "stdout": stdout, "stderr": stderr}
+
+
+          def discover(path):
+              clients = {}
+              def add(kind, label, command, required=False):
+                  if not command:
+                      clients[(kind, label)] = {"kind": kind, "command": None, "labels": [label], "paths": [], "required": required}
+                      return
+                  if not required and not Path(command).is_file():
+                      return
+                  key = kind, os.path.realpath(command)
+                  if key not in clients:
+                      clients[key] = {"kind": kind, "command": command, "labels": [], "paths": [], "required": required}
+                  entry = clients[key]
+                  entry["labels"].append(label)
+                  entry["paths"].append(command)
+                  entry["required"] |= required
+              for kind, command in APPLE.items():
+                  add(kind, "Apple " + kind, command, True)
+              for kind, name in (("curl", "curl"), ("git", "git"), ("python", "python3")):
+                  add(kind, "PATH " + name, shutil.which(name, path=path), True)
+              for prefix in (Path("/opt/homebrew"), Path("/usr/local")):
+                  for command in (prefix / "bin/curl", prefix / "opt/curl/bin/curl"):
+                      add("curl", "Homebrew curl", str(command))
+                  for command in (prefix / "bin/git", prefix / "opt/git/bin/git"):
+                      add("git", "Homebrew git", str(command))
+                  add("python", "Homebrew python3", str(prefix / "bin/python3"))
+                  for command in sorted(prefix.glob("opt/python*/bin/python3*")):
+                      if re.fullmatch(r"python3(?:\.[0-9]+)?", command.name):
+                          add("python", "Homebrew " + command.parent.parent.name, str(command))
+              return list(clients.values())
+
+
+          PYTHON_PROBE = '''import json, ssl, sys, urllib.request, urllib.error
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  return None
+
+          def finish(code, category, status=None, reason=None):
+              data = {"category": category}
+              if type(status) is int:
+                  data["http_status"] = status
+              if reason is not None:
+                  data["exception"] = type(reason).__name__
+                  value = getattr(reason, "verify_code", None)
+                  if type(value) is int:
+                      data["verify_code"] = value
+              print(json.dumps(data))
+              sys.exit(code)
+
+          opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
+          try:
+              with opener.open(sys.argv[1], timeout=8) as response:
+                  status = response.status
+          except urllib.error.HTTPError as error:
+              with error:
+                  finish(0, "accepted_tls", error.code)
+          except urllib.error.URLError as error:
+              if isinstance(error.reason, ssl.SSLCertVerificationError):
+                  finish(60, "certificate_rejected", reason=error.reason)
+              finish(2, "noncertificate_failure", reason=error.reason)
+          except ssl.SSLCertVerificationError as error:
+              finish(60, "certificate_rejected", reason=error)
+          except Exception as error:
+              finish(2, "noncertificate_failure", reason=error)
+          finish(0, "accepted_tls", status)
+          '''
+
+
+          def command(kind, executable, host, positive=False):
+              url = "https://" + host + "/"
+              if kind == "curl":
+                  return [executable, "-q", "--silent", "--show-error", "--output", os.devnull,
+                          "--write-out", "%{http_code}", "--proxy", "", "--noproxy", "*",
+                          "--connect-timeout", "5", "--max-time", "10", "--proto", "=https", url]
+              if kind == "git":
+                  if positive:
+                      url = "https://github.com/git/git.git"
+                  return [executable, "-c", "credential.helper=", "-c", "core.askPass=",
+                          "-c", "http.extraHeader=", "-c", "http.proxy=", "-c", "http.sslVerify=true",
+                          "-c", "http.followRedirects=false", "ls-remote", url, "HEAD"]
+              return [executable, "-I", "-S", "-c", PYTHON_PROBE, url]
+
+
+          def classify(kind, host, positive, result):
+              code = result["returncode"]
+              if result.get("error"):
+                  return {"ok": False, "category": result["error"]}
+              if kind == "curl":
+                  accepted = code == 0
+                  rejected = code == 60
+                  good_status = re.fullmatch(r"2[0-9]{2}", result.get("stdout", "")) is not None
+              elif kind == "git":
+                  accepted = code == 0
+                  # Require the client-generated fatal line for this exact fixed endpoint.
+                  # A server body, unrelated URL, substring or DNS/timeout cannot pass.
+                  pattern = (r"\Afatal: unable to access 'https://" + re.escape(host) +
+                             r"/': (?:SSL certificate problem: [^\r\n]+|server certificate verification failed[^\r\n]*|certificate verify failed[^\r\n]*)\r?\n?\Z")
+                  rejected = code == 128 and re.fullmatch(pattern, result.get("stderr", "")) is not None
+                  good_status = re.fullmatch(r"[0-9a-fA-F]{40,64}\tHEAD\r?\n?", result.get("stdout", "")) is not None
+              else:
+                  try:
+                      data = json.loads(result.get("stdout", ""))
+                  except (ValueError, TypeError):
+                      data = {}
+                  if not isinstance(data, dict):
+                      data = {}
+                  accepted = code == 0 and data.get("category") == "accepted_tls"
+                  rejected = code == 60 and data.get("category") == "certificate_rejected"
+                  status = data.get("http_status")
+                  good_status = type(status) is int and 200 <= status < 300
+              category = "accepted_tls" if accepted else "certificate_rejected" if rejected else "noncertificate_failure"
+              return {"ok": accepted and good_status if positive else rejected,
+                      "category": category, "returncode": code}
+
+
+          def safe_line(value):
+              return "".join(character if 32 <= ord(character) < 127 else "?" for character in value.splitlines()[0])[:240] if value else "unavailable"
+
+
+          def version(client, env, directory, deadline):
+              kind, executable = client["kind"], client["command"]
+              if kind == "python":
+                  args = [executable, "-I", "-S", "-c", "import ssl,sys; print(sys.version.split()[0] + ' / ' + ssl.OPENSSL_VERSION)"]
+              else:
+                  args = [executable] + (["-q"] if kind == "curl" else []) + ["--version"]
+              result = run(args, env, directory, deadline)
+              return safe_line(result.get("stdout", "")), result["returncode"] == 0
+
+
+          def probe_client(client, env, directory, deadline):
+              report = {key: client[key] for key in ("kind", "labels", "paths", "required")}
+              if not client["command"]:
+                  return dict(report, ok=False, category="required_client_missing", controls=[])
+              report["version"], version_ok = version(client, env, directory, deadline)
+              controls = []
+              for host in ("github.com",) + BAD_HOSTS:
+                  positive = host == "github.com"
+                  raw = run(command(client["kind"], client["command"], host, positive), env, directory, deadline)
+                  controls.append(dict(classify(client["kind"], host, positive, raw), host=host, positive=positive))
+              report.update(controls=controls, version_ok=version_ok, ok=version_ok and all(control["ok"] for control in controls))
+              return report
+
+
+          def image_metadata():
+              patterns = {"ImageOS": r"macos[0-9]+(?:-(?:arm64|intel))?",
+                          "ImageVersion": r"[0-9]{8}\.[0-9]+(?:\.[0-9]+)?",
+                          "RUNNER_ARCH": r"(?:ARM64|X64)"}
+              metadata = {}
+              for key, pattern in patterns.items():
+                  value = os.environ.get(key, "")
+                  metadata[key] = value if re.fullmatch(pattern, value) else "unavailable"
+              metadata["identified"] = all(value != "unavailable" for value in metadata.values())
+              return metadata
+
+
+          def main():
+              deadline = time.monotonic() + 300
+              path = os.environ.get("PATH", "/usr/bin:/bin:/usr/sbin:/sbin")
+              metadata = image_metadata()
+              metadata["machine"] = safe_line(platform.machine())
+              with tempfile.TemporaryDirectory(prefix="macos-tls-defaults-") as temporary:
+                  directory = Path(temporary)
+                  env = clean_environment(directory, path)
+                  sw = run(["/usr/bin/sw_vers"], env, directory, deadline)
+                  metadata["sw_vers"] = [safe_line(line) for line in sw.get("stdout", "").splitlines()[:3]]
+                  metadata["sw_vers_ok"] = sw["returncode"] == 0 and len(metadata["sw_vers"]) == 3
+                  print(json.dumps({"metadata": metadata}, sort_keys=True), flush=True)
+                  clients = discover(path)
+                  reports = []
+                  with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+                      futures = {pool.submit(probe_client, client, env, directory, deadline): client for client in clients}
+                      for future in concurrent.futures.as_completed(futures):
+                          try:
+                              report = future.result()
+                          except Exception:
+                              client = futures[future]
+                              report = {key: client[key] for key in ("kind", "labels", "paths", "required")}
+                              report.update(ok=False, category="probe_internal_failure", controls=[])
+                          reports.append(report)
+                          print(json.dumps(report, sort_keys=True), flush=True)
+                  passed = metadata["identified"] and metadata["sw_vers_ok"] and bool(reports) and all(report["ok"] for report in reports)
+                  print(json.dumps({"summary": {"clients": len(reports), "passed": sum(report["ok"] for report in reports), "ok": passed}}, sort_keys=True))
+                  return 0 if passed else 1
+
+
+          if __name__ == "__main__":
+              sys.exit(main())

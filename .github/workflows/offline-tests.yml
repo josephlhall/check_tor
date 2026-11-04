@@ -213,4 +213,6 @@ jobs:
         run: zsh tests/check_tor_integration_test.zsh
 
       - name: Run offline trust-control tests
-        run: python3 -m unittest discover -s tests -p 'test_curl_trust.py'
+        run: |
+          python3 -m unittest discover -s tests -p 'test_curl_trust.py'
+          python3 -m unittest discover -s tests -p 'macos_tls_defaults_test.py'
