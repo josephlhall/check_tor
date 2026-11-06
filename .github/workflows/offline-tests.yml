@@ -167,13 +167,19 @@ jobs:
                       if rejected:
                           # Git uses 128 for DNS, HTTP and authentication failures
                           # too. Require a certificate-specific diagnostic as well.
+                          # Newer libcurl reports OpenSSL verification results numerically;
+                          # only a nonzero verification result establishes rejection.
                           valid = result.returncode == 128 and re.search(
                               rf"^fatal: unable to access ['\"]{re.escape(remote)}/?['\"]: "
-                              r"(?:SSL certificate problem:|certificate verify failed|server certificate verification failed|SSL peer certificate)",
+                              r"(?:SSL certificate problem:|certificate verify failed|server certificate verification failed|SSL peer certificate|"
+                              r"SSL certificate OpenSSL verify result: [^\r\n]+ \([1-9][0-9]*\)\r?\n?\Z)",
                               result.stderr, re.I | re.M)
                       else:
                           valid = result.returncode == 0
                       if not valid:
+                          # Fixed public controls use an isolated, credential-free environment.
+                          # Bound and escape diagnostics so failures remain actionable.
+                          print(f"Git control diagnostic: {ascii(result.stderr[:1000])}")
                           raise SystemExit(f"Git trust control failed: {remote} exit {result.returncode}; "
                                            + ("expected certificate rejection" if rejected else "positive control failed"))
               print(f"Checkout Git trust controls passed: {git}; GitHub reachable; all four affected chains rejected")

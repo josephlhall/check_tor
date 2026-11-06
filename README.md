@@ -1,7 +1,7 @@
 # Tor Reachability Scanner
 
-A `zsh` utility script for Project Galileo that probes a list of domains through
-a local Tor SOCKS proxy. It classifies automated HTTPS outcomes such as HTTP
+A `zsh` utility script that probes a list of domains through a local Tor SOCKS
+proxy. It classifies automated HTTPS outcomes such as HTTP
 refusals, challenge-like responses, TLS failures, and SOCKS failures. For a
 persistent block-like result, an automated clearnet control can show whether
 the Tor request fared worse. Recognized response signatures can suggest the
@@ -323,7 +323,10 @@ running the offline suites.
 
 ## Handling target lists
 
-**Do not commit real target lists.** A list of domains being checked for Tor reachability is a list of organizations that believe they are at risk and are seeking protection they do not yet have. Each domain is individually public, but the curated set is not—published, it is a pre-filtered reconnaissance aid that also implies which organizations are currently unprotected.
+**Do not commit real target lists.** Operational target lists can reveal
+sensitive associations, selection criteria, or research priorities even when
+individual domains are public. Inclusion does not establish an organization’s
+protection status or participation in any program.
 
 Three things in this repository exist to prevent that:
 

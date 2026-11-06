@@ -4,8 +4,8 @@
 # endpoints. They are safe to scan, and between them they exercise most of
 # the verdicts the script can produce.
 #
-# IMPORTANT: keep real target lists OUT of this repository. A list of
-# domains seeking protection is itself sensitive—see "Handling target
+# IMPORTANT: keep real target lists OUT of this repository. Operational
+# target lists can reveal sensitive associations—see "Handling target
 # lists" in README.md. `targets.txt` and `scans/` are gitignored for
 # exactly this reason.
 

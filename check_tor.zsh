@@ -445,9 +445,9 @@ check_dependencies() {
 
 warn_tracked_input() {
     local input_file=$1
-    # A real target list names organizations that believe they are at risk and
-    # are seeking protection they do not yet have. Published, it is a ready-made
-    # reconnaissance aid. Warn loudly if this file is tracked by git.
+    # Curated target lists can reveal sensitive associations, selection
+    # criteria, or research priorities even when individual domains are public.
+    # Warn loudly if this file is tracked by git.
     if (( $+commands[git] )) \
        && git -C "${input_file:A:h}" rev-parse --is-inside-work-tree &>/dev/null \
        && git -C "${input_file:A:h}" ls-files --error-unmatch "${input_file:A}" &>/dev/null; then
