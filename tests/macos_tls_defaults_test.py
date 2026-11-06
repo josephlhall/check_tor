@@ -88,6 +88,20 @@ class DefaultTrustTests(unittest.TestCase):
         self.assertFalse(classify("git", "github.com", True, {"returncode": 0, "stdout": ""})["ok"])
         self.assertTrue(classify("git", "github.com", True, {"returncode": 0, "stdout": "a" * 40 + "\tHEAD\n"})["ok"])
 
+    def test_openssl_git_diagnostic_requires_nonzero_verify_code(self):
+        host = PROBE["BAD_HOSTS"][0]
+        genuine = f"fatal: unable to access 'https://{host}/': SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)\n"
+        classify = PROBE["classify"]
+        self.assertTrue(classify("git", host, False, {"returncode": 128, "stderr": genuine})["ok"])
+        for code, diagnostic in (
+            (0, genuine), (1, genuine), (128, genuine.replace("(20)", "(0)")),
+            (128, genuine.replace("(20)", "(unknown)")),
+            (128, "remote: " + genuine), (128, genuine.replace(host, "other.example.test")),
+            (128, genuine + "server content"),
+        ):
+            with self.subTest(code=code, diagnostic=diagnostic):
+                self.assertFalse(classify("git", host, False, {"returncode": code, "stderr": diagnostic})["ok"])
+
     def python_result(self, error=None, status=200):
         opener = MagicMock()
         if error is not None:

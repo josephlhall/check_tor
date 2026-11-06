@@ -182,6 +182,22 @@ class GitTrustTests(unittest.TestCase):
         self.responses.write_text(json.dumps({remote: [128, f"fatal: unable to access '{remote}/': server certificate verification failed. CAfile: test"]}))
         self.run_guard()
 
+    def test_openssl_verify_result_requires_nonzero_code_and_matching_fatal_line(self):
+        remote = f"https://{HOSTS[0]}/check.git"
+        genuine = f"fatal: unable to access '{remote}/': SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)"
+        self.responses.write_text(json.dumps({remote: [128, genuine]}))
+        self.run_guard()
+        for code, diagnostic in (
+            (0, genuine), (1, genuine), (128, genuine.replace("(20)", "(0)")),
+            (128, genuine.replace("(20)", "(unknown)")),
+            (128, "remote: " + genuine), (128, genuine.replace(HOSTS[0], "other.example.test")),
+            (128, genuine + "server content"),
+        ):
+            with self.subTest(code=code, diagnostic=diagnostic):
+                self.responses.write_text(json.dumps({remote: [code, diagnostic]}))
+                with self.assertRaisesRegex(SystemExit, "expected certificate rejection"):
+                    self.run_guard()
+
     def test_missing_git_refuses_without_queries(self):
         with patch.object(self.guard["shutil"], "which", return_value=None):
             with self.assertRaisesRegex(SystemExit, "Git is unavailable"):
