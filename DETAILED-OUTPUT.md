@@ -35,6 +35,7 @@ site. Keep output outside the repository with restrictive permissions.
 | No `--trials` | Retry the existing block-like outcomes, stopping on PASS/CERT/WARN or at `--circuits`. |
 | `--trials N` | Make exactly N Tor observations unless the run fails or is interrupted. Successes and CERT/WARN outcomes do not end the sequence. No additional failure retries are added. |
 | `--control conditional` | Make a direct control only when the associated Tor result is block-like. This is the default. |
+| `--max-redirects N` | Follow at most `0`–`100` redirects per Tor/direct target probe; default `10`. Available in every output mode. |
 | `--control always` | Make the control even after a successful Tor result. |
 | `--control never` / `--no-clearnet` | Make no direct controls. |
 | `--control-scope target` | One control for the whole target bundle; conditional eligibility uses its final Tor observation. This is the default. |
@@ -156,6 +157,62 @@ target observations. A missing verdict-count key means zero occurrences.
 Consumers may ignore additional optional fields within v2. Removing fields or
 changing their types or meanings requires a new schema version. Do not parse
 human `detail` strings to recover fields or use them as stable classifications.
+
+## Redirect observations
+
+`--max-redirects N` counts redirects **followed**, excluding the initial request.
+For A → B → C, zero visits A and leaves B unvisited; one visits A and B and
+leaves C unvisited. A terminal response reached after exactly N redirects is
+not exhaustion. The default remains ten, and preflight follows no redirects
+regardless of this setting. `run_start.settings.max_redirects` and
+`settings.request_profile.redirect_limit` both report the effective choice.
+
+Target `attempt_end` records add optional fields within schema v2:
+
+| Field | Meaning |
+| --- | --- |
+| `stop_reason` | `redirect_limit` for native curl exit 47, `body_limit` when the inspection cap takes precedence, otherwise null. A stop is inconclusive about subsequent access. |
+| `redirect_evidence.state` | `complete`, `unavailable`, `invalid`, `unsupported`, or `truncated` extraction. This describes evidence quality, not access or scanner completion. |
+| `redirect_evidence.followed` | Ordered records with one-based `hop`, `http_status`, `response_url`, and resolved `destination` for each retained followed redirect. A prefix may be retained when later evidence is unusable. |
+| `redirect_evidence.next_destination` | Resolved, sanitized destination left unvisited at curl's redirect limit, or null. This URL has no observed response status. |
+| `redirect_evidence.next_destination_state` | `available`, `absent`, `invalid`, `unsupported`, `truncated`, `unavailable`, or `not_applicable` (no redirect-limit stop). |
+
+Existing `final_url` and `http_status` describe the final **visited** response;
+`redirect_count` remains curl's number of followed redirects, even when fewer
+hops can be retained as evidence. Native curl status/error facts are preserved.
+Reaching the limit is `WARN`, not proof of a loop, inaccessible destination, or
+Tor blocking. It causes neither failure-driven retries nor conditional controls;
+explicit fixed trials and always-controls retain their schedules.
+
+The cutoff destination comes from curl's native `redirect_url`, including its
+resolution of relative Location values. It can remain available even when hop
+headers are unavailable. The collector reconstructs followed hops from complete
+HTTP response blocks and curl's follow count, ignoring informational and proxy
+CONNECT responses. It resolves relative Location values against the response
+URL and checks the reconstructed terminal URL against curl's effective URL.
+References with known curl/Python resolution differences (such as three leading
+slashes, fragment-only references, empty query/fragment delimiters, explicit
+schemes without an authority, or repeated path slashes) are unsupported for
+reconstruction. Unnormalized dot segments are also unsupported. Inconsistent facts, missing headers,
+duplicate/folded Location values, malformed URLs, and unsupported schemes are
+represented explicitly rather than guessed. Missing facts stay null; an empty
+retained hop list does not prove that no redirects occurred.
+
+`settings.redirect_evidence_bounds` records finite extraction/retention bounds:
+at most 262144 private header bytes examined, 100 hop records, 8192 UTF-8 bytes
+per URL value, and 65536 bytes of JSON-escaped evidence per attempt. When a bound
+is exceeded, whole URL values or trailing hop records are omitted and evidence
+is marked truncated; URLs are never shortened into apparently valid destinations.
+These metadata bounds do not increase curl's follow budget or change its body,
+timeout, or routing policies. Private response files are removed with their
+request directory and are never exported.
+
+Only allowlisted status and sanitized URL fields are retained; raw headers,
+cookies, authorization material, and bodies are excluded. URL userinfo is
+removed from every exported hop and next destination. Query strings and
+fragments are retained for destination interpretation and may contain sensitive
+values: detailed output remains operational data, not anonymized output. Invalid
+metadata is represented by fixed state labels, never echoed in diagnostics.
 
 UTC timestamps describe civil time and may move if the system clock changes.
 Pacing, durations, and partner gaps use Python's monotonic clock. Monotonic

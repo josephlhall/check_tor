@@ -207,8 +207,10 @@ Completed preparation:
 - Decide whether the study evaluates the current defaults or a fixed explicit
   configuration. The scanner defaults to `localhost:9050`, three Tor attempts,
   first/retry/clearnet timeouts of 60/30/20 seconds, and an enabled clearnet
-  control. The corresponding command-line settings may be frozen explicitly;
-  the HTTP request profile and 1 MiB response inspection cap remain fixed.
+  control. The corresponding command-line settings, including the default ten
+  followed redirects, may be frozen explicitly; browser-like headers and the
+  1 MiB response inspection cap remain fixed. The redirect-limit option does
+  not amend the completed frozen protocol.
 
 **Completed output:** a governed measurement contract and frozen per-case
 protocol (`TACP-0.2`).
@@ -323,6 +325,25 @@ sequential, their start-to-start gap is recorded, and late or missing partners
 remain visible. A shared target-level control is not a matched control for
 every trial. Native verdicts remain automated curl outcomes, not browser
 access claims or evidence of deliberate site policy.
+
+The configurable redirect boundary (`--max-redirects`, default ten) counts
+redirects followed after the initial request. Zero and one enable bounded
+observations. If curl stops because another redirect would exceed that budget,
+`WARN` means subsequent access was not observed; it establishes neither a loop
+nor inaccessibility nor Tor blocking. Terminal responses reached within the
+budget keep their usual classification. Intentional stops do not trigger
+failure retries or conditional controls; fixed trials and always-controls keep
+their explicit schedules, and preflight remains separate.
+
+Detailed records preserve bounded, sanitized followed-hop evidence and an
+unvisited next destination where available, alongside the native final visited
+URL, HTTP status, and redirect count. Evidence quality and missing/truncated
+metadata are explicit; an unvisited destination has no observed response.
+[The output contract](DETAILED-OUTPUT.md#redirect-observations) defines the
+finite bounds and sensitive query/fragment handling. Freeze the chosen redirect
+limit prospectively for new studies. Synthetic offline chain/contact tests
+establish software behavior only; they add no live findings or evidence to
+frozen protocols or completed pilots.
 
 Bounded workers share Tor and network capacity. Global pacing controls the
 coordinator's top-level probe invocations, including preflight; it does not

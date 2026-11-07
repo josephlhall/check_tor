@@ -176,7 +176,7 @@ assert_eq "source stderr" "" "$(< "$source_case/stderr")"
 assert_eq "source preserves caller arguments and trap" \
     "2:caller-argument:second-argument" "$(< "$source_case/caller-trap")"
 assert_eq "source callable boundaries" \
-    "$source_case/targets.txt:jsonl,localhost:9050,3,60,30,20,1:\"quote\\\" slash\\\\ tab\\u0009 line\\u000a\":alpha.example.test,beta.example.test" \
+    "$source_case/targets.txt:jsonl,localhost:9050,3,60,30,20,1,10:\"quote\\\" slash\\\\ tab\\u0009 line\\u000a\":alpha.example.test,beta.example.test" \
     "$(< "$source_case/function-result")"
 assert_eq "source curl calls" "" "$(< "$source_case/curl.log")"
 assert_eq "source temporary files" 0 "$(find "$source_case/scanner-tmp" -type f | wc -l | tr -d ' ')"

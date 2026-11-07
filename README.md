@@ -116,6 +116,7 @@ mode additionally requires Python 3.9 or newer (standard library only).
    |---|---:|---|
    | `--proxy` | `localhost:9050` | SOCKS proxy as `HOST:PORT` |
    | `--circuits` | `3` | `1`–`100` Tor attempts |
+   | `--max-redirects` | `10` | `0`–`100` redirects followed per target/control probe |
    | `--timeout-first` | `60` | `1`–`3600` seconds |
    | `--timeout-retry` | `30` | `1`–`3600` seconds |
    | `--timeout-clearnet` | `20` | `1`–`3600` seconds |
@@ -131,9 +132,23 @@ mode additionally requires Python 3.9 or newer (standard library only).
 
    Without the clearnet control, persistent block-like results still describe
    what the automated Tor requests observed, but Tor specificity remains
-   unknown. The scanner's HTTP request profile and 1 MiB response inspection
+   unknown. The scanner's browser-like headers and 1 MiB response inspection
    cap are intentionally fixed; these settings do not make `curl` impersonate
    Tor Browser.
+
+   Redirect counting excludes the initial request. With `--max-redirects 0`,
+   only that request is made; with `1`, one redirect may be followed. A terminal
+   response reached exactly within the budget keeps its normal classification.
+   If another redirect would need following, the scanner reports an inconclusive
+   warning: access beyond that boundary is unobserved, and a finite chain can
+   reach the limit just as a cycle can. This stop does not cause failure-driven
+   retries or conditional clearnet controls. Detailed mode still honors explicit
+   fixed trials and always-controls. Tor preflight keeps its separate policy
+   of following no redirects.
+
+   [Detailed output](DETAILED-OUTPUT.md#redirect-observations) adds bounded,
+   sanitized hop evidence and the next destination left unvisited. Text and
+   JSONL v1 keep their existing schemas and report the stop in human detail.
 
 4. **Stop the Tor proxy (when finished):**
    ```zsh
@@ -319,7 +334,7 @@ The regression suites are deterministic and offline. They use synthetic
 `.example.test` targets and temporary files; they never inspect `targets.txt`, `scans/`, or
 `*.private.txt`. You do not need a running Tor proxy or Internet access.
 
-The repository has six complementary suites:
+The repository has seven complementary suites:
 
 * `tests/check_tor_test.zsh` exercises the decision logic directly, including
   curl and HTTP classification, WAF fingerprints, retry eligibility, severity,
@@ -332,6 +347,10 @@ The repository has six complementary suites:
 * `tests/test_measurement.py` checks detailed records, trial/control policies,
   routing, seeded ordering, global pacing, worker limits, cancellation, and
   output failures using synthetic per-request fake-curl fixtures.
+* `tests/test_redirects.py` models redirect chains with a separate synthetic
+  destination-contact log. It checks follow limits, exact-budget terminal
+  responses, both routes and all formats, relative URLs, cycles, hostile
+  metadata, redaction, and retained-evidence bounds.
 * `tests/test_transport_review.py` uses real curl with local `file://` fixtures
   to check literal URL handling, plus fake-curl fixtures for detailed request
   configuration and classifier failures. It does not exercise real connection
@@ -353,6 +372,7 @@ zsh tests/check_tor_test.zsh
 zsh tests/check_tor_integration_test.zsh
 python3 -m unittest discover -s tests -p 'test_measurement.py'
 python3 -m unittest discover -s tests -p 'test_transport_review.py'
+python3 -m unittest discover -s tests -p 'test_redirects.py'
 python3 -m unittest discover -s tests -p 'test_curl_trust.py'
 python3 -m unittest discover -s tests -p 'macos_tls_defaults_test.py'
 git diff --check
@@ -452,7 +472,7 @@ The script evaluates `curl` exit codes, HTTP status codes, and response contents
   connection. When available, the detail distinguishes a stall after TLS from
   a failure before any response; the causal explanation remains uncertain.
 * **[WARNING]** (Yellow): Anything else—including unexpected status codes,
-  redirect loops, unusual `curl` failures, and the intentional response-body
+  redirect follow limits, unusual `curl` failures, and the intentional response-body
   cutoff—is left for manual triage.
 
 ## License

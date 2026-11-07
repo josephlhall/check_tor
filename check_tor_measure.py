@@ -30,6 +30,12 @@ SCHEMA = 2
 BLOCKY = {"FAIL", "CHALLENGE", "RATELIMIT", "DROP", "TIMEOUT", "SOCKS"}
 VERDICTS = BLOCKY | {"PASS", "CERT", "WARN"}
 MAX_RESULT_BYTES = 131072
+# These are retained metadata bounds, independent of curl's follow budget.
+# Read private headers only here, before their request directory is removed.
+MAX_REDIRECT_HEADER_BYTES = 262144
+MAX_REDIRECT_HOPS = 100
+MAX_REDIRECT_URL_BYTES = 8192
+MAX_REDIRECT_EVIDENCE_BYTES = 65536
 CANCELLED = 0
 
 
@@ -81,6 +87,7 @@ def arguments(argv):
     p.add_argument("--format", choices=["jsonl-v2"], default="jsonl-v2")
     p.add_argument("--proxy", default="localhost:9050")
     p.add_argument("--circuits", type=bounded_int(100), default=3)
+    p.add_argument("--max-redirects", type=bounded_int(100, 0), default=10)
     p.add_argument("--timeout-first", type=bounded_int(3600), default=60)
     p.add_argument("--timeout-retry", type=bounded_int(3600), default=30)
     p.add_argument("--timeout-clearnet", type=bounded_int(3600), default=20)
@@ -250,6 +257,207 @@ def scrub(value):
     )
 
 
+def redirect_url(value, base=None):
+    """Resolve before removing userinfo; never return a partial URL as evidence."""
+    if len(value.encode("utf-8")) > MAX_REDIRECT_URL_BYTES:
+        return None, "truncated"
+    if not value or re.search(r"[\x00-\x20\x7f]", value) or "\\" in value:
+        return None, "invalid"
+    try:
+        # curl accepts some references differently from RFC-oriented urljoin.
+        # Refuse those for reconstructed followed hops; native redirect_url
+        # independently supplies the destination at the observation boundary.
+        reference = urllib.parse.urlsplit(value)
+        if base and (
+            value.startswith(("///", "#"))
+            or value.endswith(("?", "#"))
+            or re.search(r"\?(?:#|$)", value)
+            or "//" in reference.path
+            or "//" in urllib.parse.urlsplit(base).path
+            or (
+                reference.scheme
+                and (
+                    not reference.netloc
+                    or not value.startswith(("http://", "https://"))
+                )
+            )
+        ):
+            return None, "unsupported"
+        resolved = urllib.parse.urljoin(base, value) if base else value
+        parsed = urllib.parse.urlsplit(resolved)
+        if parsed.scheme.lower() not in ("http", "https"):
+            return None, "unsupported"
+        if not parsed.hostname:
+            return None, "invalid"
+        if any(segment in (".", "..") for segment in parsed.path.split("/")):
+            return None, "unsupported"
+        # Accessing .port validates malformed and out-of-range ports too.
+        port = parsed.port
+        host = parsed.hostname
+        if ":" in host:
+            host = "[" + host + "]"
+        if port is not None:
+            host += ":" + str(port)
+        safe = urllib.parse.urlunsplit(parsed._replace(netloc=host))
+    except ValueError:
+        return None, "invalid"
+    if len(safe.encode("utf-8")) > MAX_REDIRECT_URL_BYTES:
+        return None, "truncated"
+    return safe, "available"
+
+
+def redirect_evidence(directory, initial_url, result):
+    """Join complete HTTP response blocks to curl's authoritative follow count.
+
+    Headers alone are not a request log: informational responses and proxy
+    CONNECT responses are not redirect hops. Conflicting or incomplete facts
+    must not manufacture a visited destination. Raw headers never leave here.
+    """
+    evidence = dict(
+        state="unavailable",
+        followed=[],
+        next_destination=None,
+        next_destination_state="unavailable",
+    )
+    at_limit = result["curl_exit"] == 47
+    if not at_limit:
+        evidence["next_destination_state"] = "not_applicable"
+    elif result.get("next_redirect_truncated"):
+        evidence.update(state="truncated", next_destination_state="truncated")
+    elif result.get("next_redirect_url"):
+        target, state = redirect_url(result["next_redirect_url"])
+        evidence.update(next_destination=target, next_destination_state=state)
+    try:
+        with (directory / "headers").open("rb") as source:
+            raw = source.read(MAX_REDIRECT_HEADER_BYTES + 1)
+    except OSError:
+        return evidence
+    truncated = len(raw) > MAX_REDIRECT_HEADER_BYTES
+    raw = raw[:MAX_REDIRECT_HEADER_BYTES]
+    blocks = []
+    parts = re.split(rb"\r?\n\r?\n", raw)
+    for block in parts[:-1]:
+        lines = block.splitlines()
+        if not lines:
+            continue
+        status = re.fullmatch(
+            rb"HTTP/(?:1\.[01]|2|3) +([0-9]{3})(?: +([^\r\n]*))?", lines[0]
+        )
+        if not status:
+            evidence["state"] = "invalid"
+            return evidence
+        code = int(status[1])
+        if (
+            100 <= code < 200
+            or (status[2] or b"").lower() == b"connection established"
+        ):
+            continue
+        locations = [
+            line.split(b":", 1)[1].strip(b" \t")
+            for line in lines[1:]
+            if line.lower().startswith(b"location:")
+        ]
+        # Folded Location values are ambiguous; never export their raw content.
+        folded = any(line.startswith((b" ", b"\t")) for line in lines[1:])
+        blocks.append((code, locations, folded))
+    count = result["redirect_count"]
+    if type(count) is not int or not 0 <= count <= MAX_REDIRECT_HOPS:
+        return evidence
+    if not blocks:
+        evidence["state"] = "truncated" if truncated else "unavailable"
+        return evidence
+    if not truncated and (len(blocks) != count + 1 or parts[-1]):
+        return evidence
+    evidence["state"] = "truncated" if truncated else "complete"
+    current = initial_url
+
+    def destination(block):
+        _, locations, folded = block
+        if not locations:
+            return None, "absent"
+        if len(locations) != 1 or folded:
+            return None, "invalid"
+        try:
+            location = locations[0].decode("utf-8")
+        except UnicodeError:
+            return None, "invalid"
+        return redirect_url(location, current)
+
+    for index, block in enumerate(blocks[:count]):
+        # Only curl-followable redirect responses can explain a followed hop.
+        if not 300 <= block[0] < 400:
+            evidence["state"] = "unsupported"
+            break
+        response_url, response_state = redirect_url(current)
+        target, state = destination(block)
+        if state != "available" or response_state != "available":
+            evidence["state"] = (
+                "unavailable" if state == "absent"
+                else state if state != "available" else response_state
+            )
+            break
+        evidence["followed"].append(
+            dict(
+                hop=index + 1,
+                http_status=block[0],
+                response_url=response_url,
+                destination=target,
+            )
+        )
+        # Resolution must retain the original base semantics, including userinfo.
+        current = urllib.parse.urljoin(current, block[1][0].decode("utf-8"))
+    if (
+        len(evidence["followed"]) == count
+        and len(blocks) == count + 1
+        and not truncated
+    ):
+        # Effective URL is curl's final visited destination, not a reconstruction.
+        # Fragment and an omitted root slash do not change the HTTP request URL.
+        reconstructed, _ = redirect_url(current)
+        actual, _ = redirect_url(result.get("final_url") or "")
+
+        def request_url(value):
+            if value is None:
+                return None
+            parsed = urllib.parse.urlsplit(value)
+            return parsed._replace(path=parsed.path or "/", fragment="").geturl()
+
+        if blocks[-1][0] != result["http_status"]:
+            evidence.update(state="invalid", followed=[])
+        elif actual is None:
+            evidence.update(state="unavailable", followed=[])
+        elif request_url(actual) != request_url(reconstructed):
+            evidence.update(state="unsupported", followed=[])
+        elif at_limit:
+            if not 300 <= blocks[-1][0] < 400:
+                evidence["state"] = "invalid"
+            elif (
+                not result.get("next_redirect_url")
+                and not result.get("next_redirect_truncated")
+            ):
+                _, state = destination(blocks[-1])
+                # A plausible Location is not a substitute for curl's resolved
+                # next URL. Only its absence/invalidity can be asserted here.
+                if state == "available":
+                    state = "unavailable"
+                evidence["next_destination_state"] = state
+    if at_limit and evidence["next_destination_state"] not in (
+        "available", "absent", "unavailable"
+    ):
+        evidence["state"] = evidence["next_destination_state"]
+    if truncated and evidence["next_destination_state"] == "unavailable":
+        evidence["next_destination_state"] = "truncated"
+    # Bound serialized bytes, including JSON escaping. Drop whole hop records;
+    # a shortened destination would look like a different, valid URL.
+    while (
+        len(json.dumps(evidence, ensure_ascii=True).encode())
+        > MAX_REDIRECT_EVIDENCE_BYTES
+    ):
+        evidence["followed"].pop()
+        evidence["state"] = "truncated"
+    return evidence
+
+
 def public_target(target):
     return {k: v for k, v in target.items() if k != "hostname"}
 
@@ -363,6 +571,7 @@ class Engine:
                 if not (k.lower().endswith("_proxy") or k.lower() == "proxy")
             }
         self.env["CHECK_TOR_PROXY"] = args.proxy
+        self.env["CHECK_TOR_MAX_REDIRECTS"] = str(args.max_redirects)
         # Alter stdout only after other initialization succeeds; run() always
         # restores its original flags, including when main was called by Zsh.
         self.writer = Writer(
@@ -378,6 +587,7 @@ class Engine:
         names = (
             "proxy",
             "circuits",
+            "max_redirects",
             "trials",
             "control",
             "control_scope",
@@ -394,6 +604,12 @@ class Engine:
         settings = {n: getattr(self.args, n) for n in names}
         settings["trial_policy"] = (
             "fixed" if self.args.trials is not None else "failure-retry"
+        )
+        settings["redirect_evidence_bounds"] = dict(
+            header_bytes=MAX_REDIRECT_HEADER_BYTES,
+            hops=MAX_REDIRECT_HOPS,
+            url_bytes=MAX_REDIRECT_URL_BYTES,
+            json_bytes=MAX_REDIRECT_EVIDENCE_BYTES,
         )
         settings["counterbalance_algorithm"] = (
             "(seed + target_occurrence - 1 + trial - 1) % 2; 0=tor-first"
@@ -659,12 +875,16 @@ class Engine:
             "curl_exit",
             "curl_error",
             "final_url",
+            "next_redirect_url",
+            "next_redirect_truncated",
             "redirect_count",
             "body_limited",
             "tor_verified",
             "local_error",
         }
         if not isinstance(result, dict) or set(result) != required:
+            return None
+        if type(result["next_redirect_truncated"]) is not bool:
             return None
         local_error = result["local_error"]
         if local_error is not None and not isinstance(local_error, str):
@@ -690,10 +910,10 @@ class Engine:
         for key in ("http_status", "redirect_count"):
             if result[key] is not None and type(result[key]) is not int:
                 return None
-        for key in ("detail", "curl_error", "final_url"):
+        for key in ("detail", "curl_error", "final_url", "next_redirect_url"):
             if result[key] is not None and not isinstance(result[key], str):
                 return None
-            if key != "final_url":
+            if key not in ("final_url", "next_redirect_url"):
                 result[key] = scrub(result[key])
         # Parse the original URL before diagnostic redaction: its [redacted]
         # placeholder is not valid URL userinfo and would discard the destination.
@@ -727,6 +947,20 @@ class Engine:
             if result is not None
             else ("aborted" if abort else "error")
         )
+        if result is not None and fields["phase"] == "target":
+            result["stop_reason"] = (
+                "body_limit"
+                if result["body_limited"]
+                else "redirect_limit" if result["curl_exit"] == 47 else None
+            )
+            result["redirect_evidence"] = redirect_evidence(
+                task["directory"], fields["url"], result
+            )
+        if result is not None:
+            # This private native URL can contain userinfo. Export only its
+            # allowlisted sanitized representation in redirect_evidence.
+            result.pop("next_redirect_url", None)
+            result.pop("next_redirect_truncated", None)
         if result is None:
             result = dict(
                 verdict=None,
