@@ -24,7 +24,7 @@
 
 `check_tor` is now well tested as software: it has deterministic offline core and integration suites, structured JSONL output, cross-platform CI, and explicit handling of operational target data. The next important question is not whether the code follows its rules. It is whether the rules measure the real-world phenomenon we care about.
 
-The scanner observes sites through `curl` over Tor. When a block-like result persists across its configured Tor attempts, it compares that result with a non-Tor `curl` control. A human Tor Browser user is a different measurement instrument. Tor Browser has browser-specific TLS and HTTP fingerprints, JavaScript, cookies, session state, challenge-solving behavior, and rendering logic that `curl` does not reproduce.
+By default, the scanner observes sites through `curl` over Tor. When a block-like result persists across its configured Tor attempts, it compares that result with a non-Tor `curl` control. A human Tor Browser user is a different measurement instrument. Tor Browser has browser-specific TLS and HTTP fingerprints, JavaScript, cookies, session state, challenge-solving behavior, and rendering logic that `curl` does not reproduce.
 
 The goal of this work is therefore **not to prove that `check_tor` is right**. It is to determine:
 
@@ -33,6 +33,16 @@ The goal of this work is therefore **not to prove that `check_tor` is right**. I
 - where the scanner is systematically optimistic or pessimistic;
 - which disagreements come from Tor exit reputation, client fingerprinting, browser behavior, or changing conditions;
 - how the tool and its documentation should describe those limits.
+
+## Current measurement capabilities
+
+Detailed records and scheduling policies shipped in
+[PR #55](https://github.com/josephlhall/check_tor/pull/55), completing issues
+#51–#53; see [Optional detailed scanner observations](#optional-detailed-scanner-observations)
+for their capabilities and limits. The approved `TACP-0.3` preparation still
+specifies JSONL v1; it has not been migrated to detailed output or a new
+schedule. The completed `TACP-0.2` pilot and its findings remain unchanged,
+and new scanner options grant no live authority.
 
 ## The central measurement question
 
@@ -241,7 +251,7 @@ interpretations in [VALIDATION-PILOT-RESULTS.md](VALIDATION-PILOT-RESULTS.md).
 
 Real sites provide ecological realism but rarely reveal the mechanism with certainty. Controlled endpoints can test whether the scanner recognizes conditions intentionally created by the operator.
 
-Issue #39 first prepares a [prospective reference protocol](VALIDATION-REFERENCE-PROTOCOL.md)
+Issue #39 completed preparation of a [prospective reference protocol](VALIDATION-REFERENCE-PROTOCOL.md)
 and [experiment packet](VALIDATION-REFERENCE-PACKET.md) for normal navigation,
 intelligible HTTP 202 semantics, an authorized challenge, client-dependent
 refusal, and Tor-versus-clearnet difference. The owner approved the preparation

@@ -125,9 +125,11 @@ start was never observed; pair completion is a separate fact.
 
 Run records contain allowlisted effective settings, configured bounds, source
 identity, caller labels, actual issued/completed counts, and terminal state.
-A source digest identifies the executable sources even when no release version
-is available. Retry-mode counts at the start are bounds rather than a promise
-that every possible request will occur. Preflight and target counts are separate.
+A source digest identifies the exact executable-source bytes, including
+comments, even when no release version is available. A comment-only source
+change therefore changes this provenance identifier without changing behavior.
+Retry-mode counts at the start are bounds rather than a promise that every
+possible request will occur. Preflight and target counts are separate.
 Verdict counts describe observations by route, not independent sites or people.
 
 The principal machine fields are:

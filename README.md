@@ -49,7 +49,7 @@ mode additionally requires Python 3.9 or newer (standard library only).
 
 ## Setup
 
-1. Keep `check_tor.zsh`, `check_tor_core.zsh`, and `scripts/` together, and copy `targets-EXAMPLE.txt` to create your own list. Keep real target lists **outside** this repository—see [Handling target lists](#handling-target-lists).
+1. Keep `check_tor.zsh`, `check_tor_core.zsh`, and `scripts/` together; detailed mode also needs `check_tor_probe.zsh` and `check_tor_measure.py` alongside them. Copy `targets-EXAMPLE.txt` to create your own list. Keep real target lists **outside** this repository—see [Handling target lists](#handling-target-lists).
 2. Make the script executable:
    ```zsh
    chmod +x check_tor.zsh
@@ -271,8 +271,10 @@ steps. Linux and macOS then check the measurement curl after checkout.
 
 Offline regression checks for the filter and preflight use Python 3, public
 root fixtures, and fake curl responses, without network access. Python 3 is
-needed only for these maintenance tests and CI bootstrap, not scanning. Run
-these with the complete offline validation sequence below.
+needed for these maintenance tests and CI bootstrap, and Python 3.9+ is also
+required for detailed `--format jsonl-v2` scanning. Text and JSONL v1 scanning
+do not require Python. Run these tests with the complete offline validation
+sequence below.
 
 The public root fixtures in `tests/fixtures/distrusted-roots.pem` are the
 emSign ECC Root CA-G3 and AAA Certificate Services roots, identified against
@@ -302,7 +304,7 @@ The regression suites are deterministic and offline. They use synthetic
 `.example.test` targets and temporary files; they never inspect `targets.txt`, `scans/`, or
 `*.private.txt`. You do not need a running Tor proxy or Internet access.
 
-The repository has five complementary suites:
+The repository has six complementary suites:
 
 * `tests/check_tor_test.zsh` exercises the decision logic directly, including
   curl and HTTP classification, WAF fingerprints, retry eligibility, severity,
@@ -315,6 +317,11 @@ The repository has five complementary suites:
 * `tests/test_measurement.py` checks detailed records, trial/control policies,
   routing, seeded ordering, global pacing, worker limits, cancellation, and
   output failures using synthetic per-request fake-curl fixtures.
+* `tests/test_transport_review.py` uses real curl with local `file://` fixtures
+  to check literal URL handling, plus fake-curl fixtures for detailed request
+  configuration and classifier failures. It does not exercise real connection
+  faults; loopback transport coverage remains tracked in
+  [issue #47](https://github.com/josephlhall/check_tor/issues/47).
 * `tests/test_curl_trust.py` checks the macOS bundle filter against the two
   public affected roots and verifies positive-control and certificate-specific
   negative-control handling with fake curl and Git clients, including connection

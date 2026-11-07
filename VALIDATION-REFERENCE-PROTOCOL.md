@@ -41,15 +41,18 @@ outcome still requires a contemporaneous record.
 
 ## Instruments and evidence
 
-Use the unchanged `check_tor` JSONL target record as the scanner result. It
-contains `verdict`, `tor_attempts`, `tor_attempt_limit`,
+Use the schema version 1 `check_tor` target record (`--format jsonl`) as the
+scanner result, as approved for this preparation. The later detailed
+[`--format jsonl-v2` mode](DETAILED-OUTPUT.md) has a separate contract and is not
+part of this approved instrument specification. The v1 target record contains
+`verdict`, `tor_attempts`, `tor_attempt_limit`,
 `clearnet_control.enabled`, `.performed`, and nullable `.verdict`, nullable
 `tor_specific`, and `body_limited`. Preserve the exact JSON values and
 schema version. A failed scanner preflight has **no target record**. Do not
 convert it to `TIMEOUT`, a missing control to `false`, or `detail` prose to a
 structured response header.
 
-The current JSONL has no HTTP status, response headers, per-attempt verdicts,
+JSONL v1 has no HTTP status, response headers, per-attempt verdicts,
 or browser outcome. A reference condition's expected status or challenge
 mechanism comes from independently reviewed operator documentation or
 controlled configuration, recorded with version and review date. Browser
