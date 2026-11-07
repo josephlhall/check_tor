@@ -117,8 +117,10 @@ class DefaultTrustTests(unittest.TestCase):
 
     def test_python_http_redirect_dns_and_certificate_classification(self):
         classify = PROBE["classify"]
+        # Real HTTP errors carry a response body. Python 3.9's context manager
+        # needs that file object; newer versions supply one when fp is None.
         for status in (302, 403, 404, 429):
-            raw = self.python_result(urllib.error.HTTPError("https://PRIVATE.invalid", status, "PRIVATE", {}, None))
+            raw = self.python_result(urllib.error.HTTPError("https://PRIVATE.invalid", status, "PRIVATE", {}, io.BytesIO()))
             self.assertEqual(raw["returncode"], 0)
             self.assertFalse(classify("python", "bad", False, raw)["ok"])
             self.assertFalse(classify("python", "github.com", True, raw)["ok"])

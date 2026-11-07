@@ -63,7 +63,10 @@ responses = plan.get(url + "|" + route, plan.get(url, [{}]))
 response = responses[min(number, len(responses)-1)]
 if url == "https://check.torproject.org/api/ip":
     response = plan.get("preflight", [{}])[0]
-record = {"pid": os.getpid(), "url": url, "route": route, "start": time.monotonic(),
+# Python 3.9 on macOS gives time.monotonic() a process-local epoch. Tests
+# compare different fake-curl processes, so use the shared POSIX clock.
+record = {"pid": os.getpid(), "url": url, "route": route,
+          "start": time.clock_gettime(time.CLOCK_MONOTONIC),
           "args": args, "proxy_env": {key: os.environ.get(key) for key in
           ("http_proxy", "https_proxy", "all_proxy", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "no_proxy")},
           "trust_env": os.environ.get("SSL_CERT_FILE")}
@@ -136,7 +139,7 @@ if "-w" in args and not response.get("omit_writeout"):
     for name, value in values.items():
         writeout = writeout.replace("%{" + name + "}", str(value))
     sys.stdout.write(writeout)
-record["end"] = time.monotonic()
+record["end"] = time.clock_gettime(time.CLOCK_MONOTONIC)
 publish(logs / (str(os.getpid()) + ".end.json"), record)
 sys.exit(response.get("exit", 23 if write_failed else 0))
 """
