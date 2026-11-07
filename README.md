@@ -136,9 +136,8 @@ succeeds. Transient progress and color appear only at a terminal. Set
 [`NO_COLOR`](https://no-color.org/) to disable color. The scanner writes errors
 to stderr, and a failed Tor preflight can leave the opening text on stdout.
 
-Use `--format jsonl` for automation. After a passing curl trust check in the
-same environment, save the scanner output to a private file outside the
-repository.
+Use `--format jsonl` for automation. Save the scanner output to a private
+file outside the repository.
 
 ```zsh
 ./check_tor.zsh --format jsonl "$HOME/tor-targets/mylist.txt" \
