@@ -258,7 +258,11 @@ def scrub(value):
 
 
 def redirect_url(value, base=None):
-    """Resolve before removing userinfo; never return a partial URL as evidence."""
+    """Resolve before removing userinfo; never return a partial URL as evidence.
+
+    Query and fragment values remain intact for interpretation, so the result
+    is sanitized transport evidence, not anonymized or safe-to-publish data.
+    """
     if len(value.encode("utf-8")) > MAX_REDIRECT_URL_BYTES:
         return None, "truncated"
     if not value or re.search(r"[\x00-\x20\x7f]", value) or "\\" in value:
@@ -267,6 +271,8 @@ def redirect_url(value, base=None):
         # curl accepts some references differently from RFC-oriented urljoin.
         # Refuse those for reconstructed followed hops; native redirect_url
         # independently supplies the destination at the observation boundary.
+        # Reject before retaining each hop: a later absolute redirect could
+        # hide a wrong intermediate reconstruction from the terminal URL check.
         reference = urllib.parse.urlsplit(value)
         if base and (
             value.startswith(("///", "#"))
@@ -319,6 +325,9 @@ def redirect_evidence(directory, initial_url, result):
         next_destination=None,
         next_destination_state="unavailable",
     )
+    # Capture the native next destination independently: missing or truncated
+    # header evidence must not erase a safely captured curl observation. The
+    # evidence-quality state does not change the probe's native verdict.
     at_limit = result["curl_exit"] == 47
     if not at_limit:
         evidence["next_destination_state"] = "not_applicable"

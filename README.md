@@ -346,15 +346,21 @@ The repository has seven complementary suites:
   arguments, and temporary-file cleanup without reaching the network.
 * `tests/test_measurement.py` checks detailed records, trial/control policies,
   routing, seeded ordering, global pacing, worker limits, cancellation, and
-  output failures using synthetic per-request fake-curl fixtures.
+  output failures using synthetic per-request fake-curl fixtures. Live readers
+  see only atomically published JSON records. An explicit bounded barrier
+  establishes worker overlap, and separate signal fixtures check cancellation
+  without carrying a failed case's processes into the next case.
 * `tests/test_redirects.py` models redirect chains with a separate synthetic
   destination-contact log. It checks follow limits, exact-budget terminal
   responses, both routes and all formats, relative URLs, cycles, hostile
-  metadata, redaction, and retained-evidence bounds.
+  metadata, redaction, and retained-evidence bounds. A separate real-curl HTTP
+  fixture checks native URL resolution and actual contact boundaries using
+  dynamically allocated loopback ports, explicit hostname mappings, disabled
+  proxies, and DNS-free server setup.
 * `tests/test_transport_review.py` uses real curl with local `file://` fixtures
   to check literal URL handling, plus fake-curl fixtures for detailed request
   configuration and classifier failures. It does not exercise real connection
-  faults; loopback transport coverage remains tracked in
+  faults; additional real connection-failure coverage remains tracked in
   [issue #47](https://github.com/josephlhall/check_tor/issues/47).
 * `tests/test_curl_trust.py` checks the macOS bundle filter against the two
   public affected roots and verifies positive-control and certificate-specific
