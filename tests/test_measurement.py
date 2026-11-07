@@ -152,6 +152,8 @@ class MeasurementTests(unittest.TestCase):
         self.temp = Path(directory.name)
         self.bin = self.temp / "bin"
         self.bin.mkdir()
+        # The CLI resolves python3 on PATH; keep it on the tested interpreter.
+        (self.bin / "python3").symlink_to(sys.executable)
         self.logs = self.temp / "requests"
         self.logs.mkdir()
         self.scanner_tmp = self.temp / "scanner-tmp"
