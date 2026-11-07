@@ -303,21 +303,18 @@ support. A repeatable procedure, an interpretation guide grounded in actual
 observations, and a clear reason to pursue or decline further collection are
 useful outcomes even when the scanner code does not change.
 
-## Curl trust qualification
+## TLS environment and test coverage
 
-Before new measurements, run `scripts/check-curl-trust.zsh` in the measurement
-shell and require success before invoking the scanner, as described in the
-README. It tests the selected curl and CA environment with one positive and
-four affected-chain negative controls; transport failures do not prove distrust.
-The preflight is separate from Tor measurements and makes no target requests.
-Both commands ignore `.curlrc` to prevent ambient credentials, disabled TLS
-verification, or a changed request profile. Environment CA/proxy settings still
-apply and must remain the same between qualification and measurement.
+Keep the measurement environment’s curl and certificate trust store updated,
+and record intentional CA or proxy configuration alongside the runtime
+context. The scanner verifies certificates and ignores `.curlrc`; environment
+CA settings still apply. Routing behavior depends on the selected mode, as
+described in the [detailed-output guide](DETAILED-OUTPUT.md).
 
-This is an operational prerequisite for future measurements, not new
-calibration evidence. Existing pilot findings retain their historical runtime
-and protocol context; no live rerun or broader trust validation is established
-by the offline trust-control tests.
+Offline local TLS tests exercise certificate acceptance and rejection through
+the scanner’s real curl probe. They establish regression coverage, not the
+freshness of an operator’s trust store or calibration against Tor Browser.
+Existing pilot findings retain their historical runtime and protocol context.
 
 ## Initial hypotheses by verdict
 

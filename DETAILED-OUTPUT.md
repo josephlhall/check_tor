@@ -8,8 +8,8 @@ write JSON Lines. It requires Python 3.9 or newer and uses only the standard
 library. Text and JSONL v1 work with Zsh and curl without Python.
 
 Use the [first-scan instructions](README.md#run-your-first-scan) to start
-Tor and check curl's certificate trust before running these examples. Keep
-target files and output outside the repository with restrictive permissions.
+Tor before running these examples. Keep target files and output outside the
+repository with restrictive permissions.
 Use endpoints appropriate for the collection you have authorized.
 
 ## Choosing a measurement policy
@@ -25,23 +25,16 @@ For three Tor/direct pairs per input occurrence, specify fixed trials and
 a control for each trial. This example alternates which route goes first,
 uses equal request timeouts, and can overlap work on two distinct hostnames.
 
-These scheduling options bypass ambient proxies for direct probes. Qualify
-curl on that direct path with the same executable and CA settings; a check
-through an environment proxy does not cover it. Use a subshell to remove the
-proxy overrides just for the checker and this run:
+These scheduling options bypass ambient proxies for direct probes while
+preserving the configured TLS trust settings.
 
 ```zsh
-(
-  unset http_proxy https_proxy all_proxy no_proxy
-  unset HTTP_PROXY HTTPS_PROXY ALL_PROXY NO_PROXY
-  ./scripts/check-curl-trust.zsh &&
-    ./check_tor.zsh --format jsonl-v2 --trials 3 \
-      --control always --control-scope trial \
-      --order counterbalanced --seed 42 \
-      --timeout-first 30 --timeout-retry 30 --timeout-clearnet 30 \
-      --max-partner-gap 60 --workers 2 --start-gap 1 \
-      /path/outside/repo/targets.txt
-)
+./check_tor.zsh --format jsonl-v2 --trials 3 \
+  --control always --control-scope trial \
+  --order counterbalanced --seed 42 \
+  --timeout-first 30 --timeout-retry 30 --timeout-clearnet 30 \
+  --max-partner-gap 60 --workers 2 --start-gap 1 \
+  /path/outside/repo/targets.txt
 ```
 
 | Setting | Meaning |

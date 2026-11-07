@@ -43,27 +43,18 @@ and lines beginning with `#`, and rejects a list with no targets. It adds
 `https://` to bare targets and upgrades an initial `http://` to `https://`.
 Curl can then follow redirects from that starting URL.
 
-In the same shell, check curl's certificate trust and proceed only if the
-check passes. Use the same curl executable and environment for both commands.
+Run the scanner with your target list:
 
 ```zsh
-./scripts/check-curl-trust.zsh && ./check_tor.zsh "$HOME/tor-targets/mylist.txt"
+./check_tor.zsh "$HOME/tor-targets/mylist.txt"
 ```
 
-The checker first contacts GitHub over HTTPS. If that succeeds, it verifies
-that curl reports certificate verification error `60` for each of four fixed
-eMudhra test hosts. A timeout, DNS failure, or proxy failure stops the check
-because it leaves certificate rejection unverified. A pass covers these five
-controls. The checker uses curl from `PATH` and its effective proxy and trust
-settings. Repeat the check after changing the host, curl, CA files, or relevant
-environment. If you configure a CA bundle, set `CURL_CA_BUNDLE` and, where
-applicable, `SSL_CERT_FILE` or `SSL_CERT_DIR` in the same environment for both
-commands. The checker and scanner both suppress
-`.curlrc` so settings in that file do not affect their requests. See the
-[runner-image incident](https://github.com/actions/runner-images/issues/15228)
-and [Apple's affected-root guidance](https://support.apple.com/en-us/149555).
+Curl verifies HTTPS certificates using its configured trust store. Keep curl
+and that store updated. If you need a custom CA bundle, set `CURL_CA_BUNDLE`
+and, where applicable, `SSL_CERT_FILE` or `SSL_CERT_DIR`. The scanner ignores
+`.curlrc`, so settings in that file do not affect its requests.
 
-The scanner then makes a separate request to `check.torproject.org` to verify
+The scanner first makes a request to `check.torproject.org` to verify
 that the SOCKS proxy reaches the Tor network before probing your targets.
 When finished, use `brew services stop tor` on macOS or
 `sudo service tor stop` on Debian or Ubuntu if you started Tor for this scan.
@@ -183,21 +174,12 @@ specific schedule for Tor and direct comparisons. This mode requires Python
 3.9 or newer and uses only its standard library. This example schedules three
 Tor/direct pairs per target, starting each pair with Tor.
 
-Explicit scheduling options make direct probes bypass ambient proxies. If
-those proxies are configured, a trust check through them does not qualify the
-direct path. Run the checker with the proxy overrides removed, retaining the
-same curl and CA settings. This subshell confines the environment change to
-these commands:
+Explicit scheduling options make direct probes bypass ambient proxies.
 
 ```zsh
-(
-  unset http_proxy https_proxy all_proxy no_proxy
-  unset HTTP_PROXY HTTPS_PROXY ALL_PROXY NO_PROXY
-  ./scripts/check-curl-trust.zsh &&
-    ./check_tor.zsh --format jsonl-v2 --trials 3 \
-      --control always --control-scope trial \
-      "$HOME/tor-targets/mylist.txt" > "$HOME/tor-targets/observations.jsonl"
-)
+./check_tor.zsh --format jsonl-v2 --trials 3 \
+  --control always --control-scope trial \
+  "$HOME/tor-targets/mylist.txt" > "$HOME/tor-targets/observations.jsonl"
 ```
 
 The records identify which requests belong together and include timings,
@@ -251,15 +233,16 @@ roadmap](MEASUREMENT-VALIDATION.md) for methods, limits, and follow-up.
 ## Testing
 
 Run the offline checks from the repository root with Zsh, curl, and
-Python 3.9 or newer. The tests use synthetic targets, temporary files,
-and local fixtures. The redirect suite opens loopback connections. You can
-run the suites without Tor or Internet access.
+Python 3.9 or newer. The local TLS tests also need the `openssl` command to
+generate temporary test certificates; it is not a scanner dependency. The
+tests use synthetic targets and temporary files. The redirect and TLS suites
+open loopback connections. No Tor process or Internet access is needed.
 
 ```zsh
 (
   set -e
   test -x check_tor.zsh
-  for script in check_tor.zsh check_tor_core.zsh check_tor_probe.zsh scripts/*.zsh tests/*.zsh; do
+  for script in check_tor.zsh check_tor_core.zsh check_tor_probe.zsh tests/*.zsh; do
     zsh -n "$script"
   done
   zsh tests/check_tor_test.zsh
@@ -268,24 +251,23 @@ run the suites without Tor or Internet access.
   python3 -m unittest discover -s tests -p 'test_transport_review.py'
   python3 -m unittest discover -s tests -p 'test_redirects.py'
   python3 -m unittest discover -s tests -p 'test_retry_after.py'
-  python3 -m unittest discover -s tests -p 'test_curl_trust.py'
-  python3 -m unittest discover -s tests -p 'macos_tls_defaults_test.py'
+  python3 -m unittest discover -s tests -p 'test_tls.py'
   git diff --check
 )
 ```
 
 The Zsh tests cover verdicts and the ordinary CLI. The Python tests cover
 detailed measurements, transport and redirect behavior, `Retry-After`
-evidence, and the trust controls. Transport tests use local files and fake
-curl for several failure cases. Broader real connection-failure coverage
-is tracked in [issue #47](https://github.com/josephlhall/check_tor/issues/47).
+evidence, and real curl certificate validation against a local HTTPS server.
+The TLS tests cover a trusted certificate, an untrusted issuer, and a hostname
+mismatch. They use disposable trust settings without changing the machine’s
+trust store. Other transport tests use local files and fake curl for several
+failure cases. Broader real connection-failure coverage is tracked in [issue #47](https://github.com/josephlhall/check_tor/issues/47).
 
 The [Offline tests workflow](.github/workflows/offline-tests.yml) runs those
 suites on Ubuntu and macOS for pull requests and pushes to `main`, and can run
 on demand. On macOS, it also runs the Python suites with Apple’s system
-Python. The workflow separately checks the measurement curl’s certificate
-validation using fixed public control hosts; that step requires Internet
-access.
+Python. The tests make no requests to public control hosts.
 
 ## Releases and license
 
