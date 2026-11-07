@@ -1,8 +1,8 @@
 """Deterministic v2 measurement tests; all curl invocations are synthetic.
 
-Each fake request writes a separate file before sleeping. This avoids a shared
-counter or append race and lets scheduling assertions use independently observed
-process intervals rather than the coordinator's own reported timestamps.
+Each fake request atomically publishes separate files. Live readers never see
+partial JSON, and scheduling assertions use independently observed process
+intervals rather than the coordinator's own reported timestamps.
 """
 
 import contextlib
@@ -36,6 +36,21 @@ if not url:
     sys.exit(90)
 route = "tor" if "--socks5-hostname" in args else "direct"
 logs = Path(os.environ["MEASUREMENT_TEST_LOG"])
+def publish(path, value):
+    # Readers glob only *.json; rename on the same filesystem publishes one
+    # complete record. Tests can widen the incomplete-write interval on purpose.
+    pending = path.with_suffix(".pending")
+    encoded = json.dumps(value)
+    delay = float(os.environ.get("MEASUREMENT_TEST_LOG_WRITE_DELAY", "0"))
+    with pending.open("w") as destination:
+        middle = len(encoded) // 2
+        destination.write(encoded[:middle])
+        if delay:
+            destination.flush()
+            time.sleep(delay)
+        destination.write(encoded[middle:])
+    pending.replace(path)
+
 plan = json.loads(os.environ.get("MEASUREMENT_TEST_PLAN", "{}"))
 previous = []
 for path in logs.glob("*.start.json"):
@@ -52,10 +67,18 @@ record = {"pid": os.getpid(), "url": url, "route": route, "start": time.monotoni
           "args": args, "proxy_env": {key: os.environ.get(key) for key in
           ("http_proxy", "https_proxy", "all_proxy", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "no_proxy")},
           "trust_env": os.environ.get("SSL_CERT_FILE")}
-(logs / (str(os.getpid()) + ".start.json")).write_text(json.dumps(record))
+publish(logs / (str(os.getpid()) + ".start.json"), record)
 if response.get("child"):
     child = subprocess.Popen([sys.executable, "-c", "import signal,time; signal.signal(signal.SIGTERM,signal.SIG_IGN); time.sleep(60)"])
-    (logs / (str(child.pid) + ".child.json")).write_text(json.dumps({"pid": child.pid}))
+    publish(logs / (str(child.pid) + ".child.json"), {"pid": child.pid})
+if response.get("release_file"):
+    # Hold the first cohort until the test observes every configured worker.
+    # Startup speed must not decide whether their intervals overlap.
+    deadline = time.monotonic() + 10
+    while not Path(response["release_file"]).exists():
+        if time.monotonic() >= deadline:
+            sys.exit(91)
+        time.sleep(0.01)
 time.sleep(response.get("delay", 0))
 chain_headers = None
 if "chain" in response:
@@ -84,7 +107,7 @@ if "chain" in response:
     # Record contacts as the fake performs them, separately from reported
     # write-out fields. Tests assert the unvisited endpoint is absent here.
     record["contacts"] = contacts
-    (logs / (str(os.getpid()) + ".contacts.json")).write_text(json.dumps(record))
+    publish(logs / (str(os.getpid()) + ".contacts.json"), record)
 code = response.get("code", 200)
 body = response.get("body", "")
 if response.get("body_bytes"):
@@ -114,7 +137,7 @@ if "-w" in args and not response.get("omit_writeout"):
         writeout = writeout.replace("%{" + name + "}", str(value))
     sys.stdout.write(writeout)
 record["end"] = time.monotonic()
-(logs / (str(os.getpid()) + ".end.json")).write_text(json.dumps(record))
+publish(logs / (str(os.getpid()) + ".end.json"), record)
 sys.exit(response.get("exit", 23 if write_failed else 0))
 """
 
@@ -257,10 +280,13 @@ class MeasurementTests(unittest.TestCase):
             )
         return end
 
-    def wait_for_calls(self, minimum, process, timeout=5):
+    def wait_for_calls(self, minimum, process, timeout=5, children=0):
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            if len(self.calls()) >= minimum:
+            if (
+                len(self.calls()) >= minimum
+                and len(list(self.logs.glob("*.child.json"))) >= children
+            ):
                 return
             if process.poll() is not None:
                 break
@@ -658,8 +684,12 @@ class MeasurementTests(unittest.TestCase):
         for workers in (1, 2, 4):
             with self.subTest(workers=workers):
                 self.clear_logs()
-                plan = {"https://" + target: [{"delay": 0.09}] for target in targets}
-                status, rows, error = self.run_scan(
+                release = self.temp / ("overlap-release-" + str(workers))
+                plan = {
+                    "https://" + target: [{"release_file": str(release)}]
+                    for target in targets
+                }
+                process = self.spawn(
                     "--workers",
                     workers,
                     "--control",
@@ -667,7 +697,13 @@ class MeasurementTests(unittest.TestCase):
                     targets=targets,
                     plan=plan,
                 )
-                self.assertEqual(status, 0, error)
+                try:
+                    self.wait_for_calls(workers + 1, process)  # plus preflight
+                finally:
+                    release.touch()
+                stdout, error = process.communicate(timeout=20)
+                rows = self.parse(stdout)
+                self.assertEqual(process.returncode, 0, error)
                 intervals = [r for r in self.calls("end") if r["url"] != PREFLIGHT]
                 self.assertEqual(len(intervals), 5)
                 maximum = max(
@@ -768,46 +804,52 @@ class MeasurementTests(unittest.TestCase):
         )
         self.assert_clean()
 
-    def test_sigint_and_sigterm_stop_issuing_reap_and_report_missing_pairs(self):
-        for interruption in (signal.SIGINT, signal.SIGTERM):
-            with self.subTest(signal=interruption):
-                self.clear_logs()
-                process = self.spawn(
-                    "--workers",
-                    2,
-                    "--trials",
-                    3,
-                    "--control",
-                    "always",
-                    "--control-scope",
-                    "trial",
-                    targets=[
-                        "alpha.example.test",
-                        "beta.example.test",
-                        "waiting.example.test",
-                    ],
-                    plan={
-                        "https://alpha.example.test": [{"delay": 30, "child": True}],
-                        "https://beta.example.test": [{"delay": 30, "child": True}],
-                    },
-                )
-                self.wait_for_calls(3, process)
-                process.send_signal(interruption)
-                stdout, stderr = process.communicate(timeout=6)
-                self.assertNotEqual(process.returncode, 0, stderr)
-                rows = self.parse(stdout)
-                end = self.assert_accounting(rows)
-                self.assertEqual(end["state"], "interrupted")
-                self.assertEqual(len(self.calls()), 3)
-                self.assertTrue(
-                    any(r["state"] == "not_started" for r in end["target_states"])
-                )
-                pairs = self.select(rows, "pair_end")
-                self.assertTrue(pairs)
-                self.assertTrue(all(r["state"] == "missing" for r in pairs))
-                self.assertTrue(all(r["late"] is None for r in pairs))
-                self.assert_no_owned_children()
-                self.assert_clean()
+    def test_sigint_stops_issuing_reaps_and_reports_missing_pairs(self):
+        self.assert_signal_cancellation(signal.SIGINT)
+
+    def test_sigterm_stops_issuing_reaps_and_reports_missing_pairs(self):
+        self.assert_signal_cancellation(signal.SIGTERM)
+
+    def assert_signal_cancellation(self, interruption):
+        # Separate test instances isolate process ownership and temporary files
+        # even when one signal case fails before sending its interruption.
+        process = self.spawn(
+            "--workers",
+            2,
+            "--trials",
+            3,
+            "--control",
+            "always",
+            "--control-scope",
+            "trial",
+            targets=[
+                "alpha.example.test",
+                "beta.example.test",
+                "waiting.example.test",
+            ],
+            env={"MEASUREMENT_TEST_LOG_WRITE_DELAY": "0.01"},
+            plan={
+                "https://alpha.example.test": [{"delay": 30, "child": True}],
+                "https://beta.example.test": [{"delay": 30, "child": True}],
+            },
+        )
+        self.wait_for_calls(3, process, children=2)
+        process.send_signal(interruption)
+        stdout, stderr = process.communicate(timeout=6)
+        self.assertNotEqual(process.returncode, 0, stderr)
+        rows = self.parse(stdout)
+        end = self.assert_accounting(rows)
+        self.assertEqual(end["state"], "interrupted")
+        self.assertEqual(len(self.calls()), 3)
+        self.assertTrue(
+            any(r["state"] == "not_started" for r in end["target_states"])
+        )
+        pairs = self.select(rows, "pair_end")
+        self.assertTrue(pairs)
+        self.assertTrue(all(r["state"] == "missing" for r in pairs))
+        self.assertTrue(all(r["late"] is None for r in pairs))
+        self.assert_no_owned_children()
+        self.assert_clean()
 
     def test_runtime_source_and_request_directory_errors_never_claim_success(self):
         specification = importlib.util.spec_from_file_location(
