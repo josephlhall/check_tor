@@ -52,6 +52,7 @@ zsh tests/check_tor_integration_test.zsh
 python3 -m unittest discover -s tests -p 'test_measurement.py'
 python3 -m unittest discover -s tests -p 'test_transport_review.py'
 python3 -m unittest discover -s tests -p 'test_redirects.py'
+python3 -m unittest discover -s tests -p 'test_retry_after.py'
 python3 -m unittest discover -s tests -p 'test_curl_trust.py'
 python3 -m unittest discover -s tests -p 'macos_tls_defaults_test.py'
 git diff --check

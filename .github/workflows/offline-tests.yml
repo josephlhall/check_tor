@@ -223,6 +223,7 @@ jobs:
           python3 -m unittest discover -s tests -p 'test_measurement.py'
           python3 -m unittest discover -s tests -p 'test_transport_review.py'
           python3 -m unittest discover -s tests -p 'test_redirects.py'
+          python3 -m unittest discover -s tests -p 'test_retry_after.py'
 
       - name: Run offline trust-control tests
         run: |

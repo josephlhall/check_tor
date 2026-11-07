@@ -44,6 +44,16 @@ specifies JSONL v1; it has not been migrated to detailed output or a new
 schedule. The completed `TACP-0.2` pilot and its findings remain unchanged,
 and new scanner options grant no live authority.
 
+The optional `--execution-policy paired-cautious` schedule prioritizes ready
+partners and omits further work for an input hostname after an explicit HTTP
+429. Such policy omissions are missing observations, not measured negative
+responses or replacement trials. Detailed records distinguish a shortened
+schedule from full coverage and scanner failure. Structured `Retry-After`
+evidence records server metadata with bounded extraction and explicit clock
+limitations; it does not establish when access will succeed. This policy has
+synthetic offline software validation only. It does not calibrate a new
+measurement model, change frozen study protocols, or authorize live collection.
+
 ## The central measurement question
 
 Several related questions can easily be conflated:

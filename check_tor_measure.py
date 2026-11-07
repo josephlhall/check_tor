@@ -24,6 +24,8 @@ import urllib.parse
 import uuid
 from pathlib import Path
 
+from check_tor_retry import BOUNDS as RETRY_AFTER_BOUNDS, retry_after_evidence
+
 SCHEMA = 2
 # Keep this set aligned with blocky() in check_tor_core.zsh: it governs
 # retry/control scheduling, while the shell owns native verdict classification.
@@ -107,6 +109,10 @@ def arguments(argv):
     p.add_argument("--seed", type=bounded_int(2147483647, 0))
     p.add_argument("--max-partner-gap", type=gap, default=60.0)
     p.add_argument("--reproducible", action="store_true")
+    p.add_argument(
+        "--execution-policy", choices=["legacy", "paired-cautious"], default="legacy",
+        help="prioritize ready partners and stop a hostname after HTTP 429",
+    )
     p.add_argument("--workers", type=bounded_int(32), default=1)
     p.add_argument("--start-gap", type=gap, default=0.0)
     p.add_argument("target_file")
@@ -143,6 +149,7 @@ def arguments(argv):
         "--max-partner-gap",
         "--workers",
         "--start-gap",
+        "--execution-policy",
     }
     a.reproducible = a.reproducible or bool(explicit & policy_flags)
     # Endpoint grammar matches the scanner: no schemes, userinfo, or paths.
@@ -480,6 +487,7 @@ class Bundle:
         self.done = False
         self.issued = self.completed = 0
         self.pairs = {}
+        self.policy_retired = False
 
     def order(self, trial):
         if self.args.order == "counterbalanced":
@@ -571,6 +579,9 @@ class Engine:
         self.last_launch = None
         self.error = None
         self.stopping = False
+        self.hostname_stops = {}
+        self.omissions = {}
+        self.bundle_records = {}
         self.run_started = time.monotonic()
         self.env = dict(os.environ)
         if args.reproducible:
@@ -606,6 +617,7 @@ class Engine:
             "reproducible",
             "workers",
             "start_gap",
+            "execution_policy",
             "timeout_first",
             "timeout_retry",
             "timeout_clearnet",
@@ -614,6 +626,7 @@ class Engine:
         settings["trial_policy"] = (
             "fixed" if self.args.trials is not None else "failure-retry"
         )
+        settings["retry_after_bounds"] = dict(RETRY_AFTER_BOUNDS)
         settings["redirect_evidence_bounds"] = dict(
             header_bytes=MAX_REDIRECT_HEADER_BYTES,
             hops=MAX_REDIRECT_HOPS,
@@ -631,6 +644,7 @@ class Engine:
             "check_tor_core.zsh",
             "check_tor_probe.zsh",
             "check_tor_measure.py",
+            "check_tor_retry.py",
         ):
             digest.update(
                 filename.encode() + b"\0" + (self.root / filename).read_bytes() + b"\0"
@@ -682,6 +696,9 @@ class Engine:
         )
 
     def launch(self, bundle=None):
+        if bundle and bundle.target["hostname"] in self.hostname_stops:
+            self.omit(bundle)
+            return False
         if CANCELLED:
             return
         now = time.monotonic()
@@ -820,9 +837,11 @@ class Engine:
                 fields, _start=started, complete=False, status="running"
             )
         if bundle:
+            bundle.last_request = bundle.pending
             bundle.active = task
             bundle.pending = None
         self.writer.emit("attempt_start", **fields, adapter_started=True)
+        return True
 
     def kill_group(self, pid, sig):
         deadline = time.monotonic() + 0.2
@@ -845,7 +864,9 @@ class Engine:
                 time.sleep(0.005)
 
     def read_ready(self, wait=0.02):
+        progressed = False
         for key, _ in self.selector.select(wait):
+            progressed = True
             task = key.data
             try:
                 data = os.read(key.fd, 65536)
@@ -864,6 +885,8 @@ class Engine:
                 self.kill_group(task["process"].pid, signal.SIGKILL)
                 if task["eof"]:
                     self.finish(task, abort=self.stopping or bool(CANCELLED))
+                    progressed = True
+        return progressed
 
     def result(self, task, abort=False):
         # A valid final JSON object proves completion even if cancellation hits
@@ -956,11 +979,15 @@ class Engine:
             if result is not None
             else ("aborted" if abort else "error")
         )
+        ended_at = utc()
         if result is not None and fields["phase"] == "target":
             result["stop_reason"] = (
                 "body_limit"
                 if result["body_limited"]
                 else "redirect_limit" if result["curl_exit"] == 47 else None
+            )
+            result["retry_after"] = retry_after_evidence(
+                task["directory"], fields["url"], result, ended_at
             )
             result["redirect_evidence"] = redirect_evidence(
                 task["directory"], fields["url"], result
@@ -986,7 +1013,7 @@ class Engine:
         duration = time.monotonic() - task["started"]
         end = dict(
             fields,
-            ended_at=utc(),
+            ended_at=ended_at,
             duration_seconds=duration,
             status=status,
             complete=status == "complete",
@@ -1035,6 +1062,20 @@ class Engine:
                 # Advancing records conditional pairs even during cancellation.
                 # It only queues work; launch() independently rejects cancellation.
                 bundle.advance(observation)
+                if (
+                    self.args.execution_policy == "paired-cautious"
+                    and result["http_status"] == 429
+                ):
+                    host = bundle.target["hostname"]
+                    if host not in self.hostname_stops:
+                        stop = dict(
+                            hostname=host, triggering_attempt_id=end["attempt_id"],
+                            triggering_target_id=end["target_id"], route=end["route"],
+                            http_status=429,
+                        )
+                        self.hostname_stops[host] = stop
+                        self.writer.emit("hostname_stop", **stop)
+                    self.omit(bundle)
             else:
                 self.preflight_ok = result["tor_verified"] is True
         elif not abort:
@@ -1064,6 +1105,10 @@ class Engine:
                     for r in ("tor", "direct")
                     if r not in observations or not observations[r]["complete"]
                 ],
+                **(dict(missing_reason=dict(
+                    reason="hostname_stop",
+                    **self.hostname_stops[bundle.target["hostname"]],
+                )) if bundle.policy_retired and not complete else {}),
                 aborted_routes=[
                     r
                     for r, observation in observations.items()
@@ -1082,7 +1127,166 @@ class Engine:
             state=state,
             attempts_issued=bundle.issued,
             attempts_completed=bundle.completed,
+            **(dict(omission=self.omissions[bundle.target["target_id"]])
+               if bundle.target["target_id"] in self.omissions else {}),
         )
+
+    def remaining_work(self, bundle):
+        """Describe requirements without inventing unobserved conditional outcomes."""
+        if bundle.done:
+            return [], []
+        a = self.args
+        history = getattr(bundle, "history", [])
+        tor_done = sum(x["route"] == "tor" for x in history)
+        direct_done = sum(x["route"] == "direct" for x in history)
+        limit = a.trials if a.trials is not None else a.circuits
+        known, unknown = [], []
+        pending = bundle.pending or getattr(bundle, "last_request", None)
+
+        def trials(destination, route, first, last, description):
+            if first <= last:
+                destination.append(dict(
+                    route=route, trial_range=[first, last],
+                    count=last - first + 1, description=description,
+                ))
+
+        if a.trials is not None:
+            trials(known, "tor", tor_done + 1, limit, "fixed_trials")
+        else:
+            # The pending retry (or initial request) is already established;
+            # subsequent retries depend on its unobserved native verdict.
+            next_tor = tor_done == 0 or bool(pending and pending[0] == "tor")
+            if next_tor:
+                trials(known, "tor", tor_done + 1, tor_done + 1, "next_retry")
+                trials(unknown, "tor", tor_done + 2, limit, "failure_retries")
+
+        if a.control_scope == "trial":
+            if a.control == "always":
+                # Completed direct observations form a prefix for either order.
+                trials(known, "direct", direct_done + 1, limit, "always_controls")
+            elif a.control == "conditional":
+                if pending and pending[0] == "direct":
+                    trial = pending[1]
+                    trials(known, "direct", trial, trial, "conditional_control_required")
+                trials(unknown, "direct", tor_done + 1, limit, "conditional_controls")
+        elif a.control != "never" and not direct_done:
+            description = dict(route="direct", scope="target", count=1)
+            if a.control == "always" or (pending and pending[0] == "direct"):
+                known.append(dict(description, description="target_control_required"))
+            else:
+                unknown.append(dict(description, description="conditional_target_control"))
+        return known, unknown
+
+    def omit(self, bundle):
+        # Retirement is distinct from generator completion: a suppressed bundle
+        # stays partial, and an occurrence never launched stays not_started.
+        key = bundle.target["target_id"]
+        if bundle.done or key in self.omissions:
+            return
+        known, unknown = self.remaining_work(bundle)
+        if not known and not unknown:
+            return
+        omission = dict(
+            reason="hostname_stop", **self.hostname_stops[bundle.target["hostname"]],
+            known_required=known, eligibility_undetermined=unknown,
+        )
+        self.omissions[key] = omission
+        bundle.policy_retired = True
+        self.writer.emit("target_omission", **public_target(bundle.target), **omission)
+
+    def run_cautious_targets(self):
+        waiting = collections.deque(self.targets)
+        while not CANCELLED and (waiting or self.bundles or self.active):
+            # Process everything currently readable before *each* admission.
+            # This gives a newly ready partner priority and makes a completed
+            # 429 authoritative before any further launch for its hostname.
+            while self.read_ready(0):
+                pass
+            for bundle in list(self.bundles):
+                if bundle.done or bundle.policy_retired:
+                    self.end_bundle(bundle)
+                    self.bundles.remove(bundle)
+            for _ in range(len(waiting)):
+                target = waiting.popleft()
+                if target["hostname"] in self.hostname_stops:
+                    bundle = Bundle(target, self.args)
+                    bundle.advance()
+                    self.bundle_records[target["target_id"]] = bundle
+                    self.omit(bundle)
+                    self.end_bundle(bundle)
+                else:
+                    waiting.append(target)
+            if CANCELLED:
+                break
+            ready = [b for b in self.bundles if b.pending and b.active is None]
+            partners = [b for b in ready if b.pending[2] and any(
+                x["complete"] for x in b.pairs[b.pending[2]]["attempts"].values()
+            )]
+            if ready:
+                if self.launch((partners or ready)[0]):
+                    continue
+            elif len(self.bundles) < self.args.workers:
+                busy = {b.target["hostname"] for b in self.bundles}
+                for _ in range(len(waiting)):
+                    target = waiting.popleft()
+                    if target["hostname"] in busy:
+                        waiting.append(target)
+                        continue
+                    bundle = Bundle(target, self.args)
+                    bundle.advance()
+                    self.bundles.append(bundle)
+                    self.bundle_records[target["target_id"]] = bundle
+                    self.states[target["target_id"]] = "partial"
+                    self.writer.emit("bundle_start", **public_target(target), state="started")
+                    # Return to draining completions before launching this one.
+                    break
+                else:
+                    self.read_ready()
+                continue
+            self.read_ready()
+
+    def omit_stopped_occurrences(self):
+        # Cancellation can arrive in the same completion that establishes a
+        # stop. Account its unstarted duplicates even if the main loop exits.
+        for target in self.targets:
+            key = target["target_id"]
+            if target["hostname"] in self.hostname_stops and key not in self.bundle_records:
+                bundle = Bundle(target, self.args)
+                bundle.advance()
+                self.bundle_records[key] = bundle
+                self.omit(bundle)
+                self.end_bundle(bundle)
+
+    def schedule_accounting(self):
+        counts = collections.Counter({
+            "known_required_omitted": 0,
+            "eligibility_undetermined_omitted": 0,
+            "known_required_unresolved": 0,
+            "eligibility_undetermined_unresolved": 0,
+            "known_unnecessary": 0,
+        })
+        for target in self.targets:
+            key = target["target_id"]
+            bundle = self.bundle_records.get(key)
+            if bundle is None:
+                bundle = Bundle(target, self.args)
+                bundle.advance()
+            known, unknown = self.remaining_work(bundle)
+            category = "omitted" if key in self.omissions else "unresolved"
+            counts["known_required_" + category] += sum(x["count"] for x in known)
+            counts["eligibility_undetermined_" + category] += sum(x["count"] for x in unknown)
+            # Count only opportunities whose ineligibility follows from observed
+            # outcomes. An upper-bound remainder alone never proves omissions.
+            history = getattr(bundle, "history", [])
+            tor = [x for x in history if x["route"] == "tor"]
+            if self.args.control == "conditional":
+                if self.args.control_scope == "trial":
+                    counts["known_unnecessary"] += sum(x["verdict"] not in BLOCKY for x in tor)
+                elif bundle.done and tor and tor[-1]["verdict"] not in BLOCKY:
+                    counts["known_unnecessary"] += 1
+            if self.args.trials is None and tor and tor[-1]["verdict"] not in BLOCKY:
+                counts["known_unnecessary"] += self.args.circuits - len(tor)
+        return dict(counts)
 
     def cleanup(self):
         self.stopping = True
@@ -1125,35 +1329,38 @@ class Engine:
                 state, code = "interrupted", 128 + CANCELLED
             elif not self.preflight_ok:
                 raise Failure("Tor preflight failed")
-            waiting = collections.deque(self.targets)
-            while not CANCELLED and (waiting or self.bundles or self.active):
-                # Hold the hostname lock for the entire bundle, including gaps
-                # between its Tor/control requests. Paths and ports on the same
-                # normalized hostname must not create overlapping bundles.
-                busy_hosts = {b.target["hostname"] for b in self.bundles}
-                # Scan past blocked duplicates without changing occurrence IDs.
-                for _ in range(len(waiting)):
-                    if len(self.bundles) >= self.args.workers:
-                        break
-                    target = waiting.popleft()
-                    if target["hostname"] in busy_hosts:
-                        waiting.append(target)
-                        continue
-                    bundle = Bundle(target, self.args)
-                    bundle.advance()
-                    self.bundles.append(bundle)
-                    busy_hosts.add(target["hostname"])
-                    self.states[target["target_id"]] = "partial"
-                    self.writer.emit(
-                        "bundle_start", **public_target(target), state="started"
-                    )
-                for bundle in list(self.bundles):
-                    if bundle.done:
-                        self.end_bundle(bundle)
-                        self.bundles.remove(bundle)
-                    elif bundle.pending and bundle.active is None:
-                        self.launch(bundle)
-                self.read_ready()
+            if self.args.execution_policy == "paired-cautious":
+                self.run_cautious_targets()
+            else:
+                waiting = collections.deque(self.targets)
+                while not CANCELLED and (waiting or self.bundles or self.active):
+                    # Hold the hostname lock for the entire bundle, including gaps
+                    # between its Tor/control requests. Paths and ports on the same
+                    # normalized hostname must not create overlapping bundles.
+                    busy_hosts = {b.target["hostname"] for b in self.bundles}
+                    # Scan past blocked duplicates without changing occurrence IDs.
+                    for _ in range(len(waiting)):
+                        if len(self.bundles) >= self.args.workers:
+                            break
+                        target = waiting.popleft()
+                        if target["hostname"] in busy_hosts:
+                            waiting.append(target)
+                            continue
+                        bundle = Bundle(target, self.args)
+                        bundle.advance()
+                        self.bundles.append(bundle)
+                        busy_hosts.add(target["hostname"])
+                        self.states[target["target_id"]] = "partial"
+                        self.writer.emit(
+                            "bundle_start", **public_target(target), state="started"
+                        )
+                    for bundle in list(self.bundles):
+                        if bundle.done:
+                            self.end_bundle(bundle)
+                            self.bundles.remove(bundle)
+                        elif bundle.pending and bundle.active is None:
+                            self.launch(bundle)
+                    self.read_ready()
             if CANCELLED:
                 state, code = "interrupted", 128 + CANCELLED
         except (Failure, OSError, ValueError) as exc:
@@ -1173,8 +1380,31 @@ class Engine:
                 state, code = "interrupted", 128 + CANCELLED
             if not self.writer.failed:
                 try:
+                    if self.args.execution_policy == "paired-cautious":
+                        self.omit_stopped_occurrences()
                     for bundle in self.bundles:
                         self.end_bundle(bundle)
+                    coverage = {}
+                    if self.args.execution_policy == "paired-cautious":
+                        truncated = bool(self.omissions)
+                        schedule_complete = (
+                            self.preflight_ok
+                            and all(v == "complete" for v in self.states.values())
+                            and not truncated
+                        )
+                        coverage = dict(
+                            schedule_complete=schedule_complete,
+                            policy_truncated=truncated,
+                            omission_counts={
+                                name: sum(item["count"] for omission in self.omissions.values()
+                                          for item in omission[name])
+                                for name in ("known_required", "eligibility_undetermined")
+                            },
+                            hostname_stops=len(self.hostname_stops),
+                            schedule_accounting=self.schedule_accounting(),
+                        )
+                        if state == "complete" and truncated:
+                            state, code = "policy_stopped", 3
                     self.writer.emit(
                         "run_end",
                         ended_at=utc(),
@@ -1189,6 +1419,7 @@ class Engine:
                         ],
                         verdict_counts={k: dict(v) for k, v in self.verdicts.items()},
                         error=self.error,
+                        **coverage,
                     )
                 except OutputFailure:
                     code = 1
