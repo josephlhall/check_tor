@@ -987,6 +987,7 @@ class MeasurementTests(unittest.TestCase):
             "check_tor_core.zsh",
             "check_tor_measure.py",
             "check_tor_probe.zsh",
+            "check_tor_retry.py",
         ):
             shutil.copy2(ROOT / filename, copy / filename)
         (copy / "check_tor_probe.zsh").write_text(
@@ -1375,6 +1376,298 @@ class MeasurementTests(unittest.TestCase):
                 self.assertEqual(len(self.calls()), 2)
                 self.assert_clean()
                 self.assert_no_owned_children()
+
+    def test_cautious_hostname_stops_both_routes_and_normalized_duplicates(self):
+        for order, route in (("tor-first", "tor"), ("direct-first", "direct")):
+            with self.subTest(order=order):
+                self.clear_logs()
+                status, rows, error = self.run_scan(
+                    "--execution-policy", "paired-cautious", "--trials", 3,
+                    "--control", "always", "--control-scope", "trial", "--order", order,
+                    targets=["alpha.example.test/a", "ALPHA.example.test.:8443/b", "beta.example.test"],
+                    plan={"https://alpha.example.test/a|" + route: [{"code": 429}]},
+                )
+                self.assertEqual(status, 3, error)
+                ends = self.select(rows, "attempt_end", "target")
+                self.assertEqual(sum(r["target_id"] == "target-1" for r in ends), 1)
+                self.assertFalse(any(r["target_id"] == "target-2" for r in ends))
+                self.assertEqual(sum(r["target_id"] == "target-3" for r in ends), 6)
+                trigger = next(r for r in ends if r["http_status"] == 429)
+                self.assertTrue(trigger["complete"])
+                self.assertEqual(trigger["verdict"], "RATELIMIT")
+                omissions = self.select(rows, "target_omission")
+                self.assertEqual(len(omissions), 2)
+                self.assertTrue(all(r["triggering_attempt_id"] == trigger["attempt_id"] for r in omissions))
+                self.assertEqual([sum(x["count"] for x in r["known_required"]) for r in omissions], [5, 6])
+                pair = self.select(rows, "pair_end")[0]
+                self.assertEqual(pair["state"], "missing")
+                self.assertEqual(pair["aborted_routes"], [])
+                self.assertIsNone(pair["observed_start_gap_seconds"])
+                self.assertEqual(pair["missing_reason"]["triggering_attempt_id"], trigger["attempt_id"])
+                end = rows[-1]
+                self.assertEqual(end["state"], "policy_stopped")
+                self.assertIs(end["complete"], False)
+                self.assertIs(end["schedule_complete"], False)
+                self.assertIs(end["policy_truncated"], True)
+                self.assertEqual(end["omission_counts"], {"known_required": 11, "eligibility_undetermined": 0})
+                self.assertEqual([r["state"] for r in end["target_states"]], ["partial", "not_started", "complete"])
+                self.assert_accounting(rows)
+
+    def test_cautious_second_member_429_preserves_pair_and_omits_later_trials(self):
+        for order, route in (("tor-first", "direct"), ("direct-first", "tor")):
+            with self.subTest(order=order):
+                self.clear_logs()
+                status, rows, error = self.run_scan(
+                    "--execution-policy", "paired-cautious", "--trials", 2,
+                    "--control", "always", "--control-scope", "trial", "--order", order,
+                    plan={"https://alpha.example.test|" + route: [{"code": 429}]},
+                )
+                self.assertEqual(status, 3, error)
+                self.assertEqual(len(self.select(rows, "attempt_end", "target")), 2)
+                pair = self.select(rows, "pair_end")[0]
+                self.assertEqual(pair["state"], "complete")
+                self.assertEqual(pair["missing_routes"], [])
+                self.assertNotIn("missing_reason", pair)
+                self.assertEqual(rows[-1]["omission_counts"], {"known_required": 2, "eligibility_undetermined": 0})
+                self.assertEqual(rows[-1]["target_states"][0]["state"], "partial")
+                self.assert_accounting(rows)
+
+    def test_cautious_conditional_and_retry_eligibility_accounting(self):
+        for fixed in (True, False):
+            with self.subTest(fixed=fixed):
+                self.clear_logs()
+                options = (["--trials", 3, "--control-scope", "trial"] if fixed else ["--circuits", 3])
+                status, rows, error = self.run_scan(
+                    "--execution-policy", "paired-cautious", *options,
+                    plan={"https://alpha.example.test": [{"code": 429}]},
+                )
+                self.assertEqual(status, 3, error)
+                counts = rows[-1]["omission_counts"]
+                self.assertEqual(counts, {"known_required": 3 if fixed else 1, "eligibility_undetermined": 2})
+                omission = self.select(rows, "target_omission")[0]
+                self.assertEqual(omission["reason"], "hostname_stop")
+                if fixed:
+                    self.assertEqual(self.select(rows, "pair_end")[0]["missing_routes"], ["direct"])
+                self.assertEqual(len(self.select(rows, "attempt_start", "target")), 1)
+                self.assert_accounting(rows)
+
+    def test_cautious_final_429_and_non429_preserve_full_coverage(self):
+        for code in (429, 503, 403, 200):
+            with self.subTest(code=code):
+                self.clear_logs()
+                status, rows, error = self.run_scan(
+                    "--execution-policy", "paired-cautious", "--trials", 1,
+                    "--control", "always", "--control-scope", "trial",
+                    plan={"https://alpha.example.test|direct": [{"code": code}]},
+                )
+                self.assertEqual(status, 0, error)
+                self.assertEqual(rows[-1]["state"], "complete")
+                self.assertTrue(rows[-1]["schedule_complete"])
+                self.assertFalse(rows[-1]["policy_truncated"])
+                self.assertEqual(len(self.select(rows, "hostname_stop")), int(code == 429))
+                self.assertEqual(self.select(rows, "target_omission"), [])
+                self.assertEqual(self.select(rows, "pair_end")[0]["state"], "complete")
+                self.assert_accounting(rows)
+        self.clear_logs()
+        status, rows, error = self.run_scan(
+            "--trials", 2, "--control", "always", "--control-scope", "trial",
+            plan={"https://alpha.example.test": [{"code": 429}]},
+        )
+        self.assertEqual(status, 0, error)
+        self.assertEqual(len(self.select(rows, "attempt_end", "target")), 4)
+        self.assertNotIn("policy_truncated", rows[-1])
+
+    def test_cautious_virtual_clock_prioritizes_ready_partners(self):
+        specification = importlib.util.spec_from_file_location("measurement_priority_subject", ROOT / "check_tor_measure.py")
+        coordinator = importlib.util.module_from_spec(specification)
+        specification.loader.exec_module(coordinator)
+        # All order variants use two concurrent bundles. Drain one completion
+        # at a time so the second must be consumed before any new launch.
+        for control, order, trials in (("always", "tor-first", 1), ("always", "direct-first", 1),
+                                       ("always", "counterbalanced", 1), ("conditional", "tor-first", 2)):
+            with self.subTest(control=control, order=order):
+                records, launches = [], []
+                clock = [0.0]
+                self.input.write_text("alpha.example.test\nbeta.example.test\ngamma.example.test\n")
+                options = ["--execution-policy", "paired-cautious", "--trials", str(trials),
+                           "--control", control, "--control-scope", "trial", "--order", order,
+                           "--workers", "2", "--start-gap", "0.25"]
+                if order == "counterbalanced":
+                    options += ["--seed", "0"]
+
+                class CaptureWriter:
+                    failed = False
+                    def __init__(self, common):
+                        pass
+                    def emit(self, kind, **fields):
+                        records.append(dict(type=kind, **fields))
+                    def restore(self):
+                        pass
+
+                with mock.patch.object(coordinator, "Writer", CaptureWriter):
+                    engine = coordinator.Engine(coordinator.arguments(options + [str(self.input)]), coordinator.load_targets(self.input))
+
+                def launch(bundle):
+                    if engine.last_launch is not None and clock[0] - engine.last_launch < 0.25:
+                        return False
+                    route, trial, pair = bundle.pending
+                    self.assertLess(len(engine.active), 2)
+                    launches.append((bundle.target["target_id"], route, trial, clock[0]))
+                    bundle.issued += 1
+                    bundle.active = dict(bundle=bundle, request=bundle.pending, start=clock[0],
+                                         due=(1.0 if control == "conditional" or len(launches) == 2 else 1.25)
+                                         if len(launches) <= 2 else clock[0] + 0.5)
+                    bundle.pending = None
+                    engine.active[bundle.target["target_id"]] = bundle.active
+                    engine.last_launch = clock[0]
+                    return True
+
+                def read_ready(wait=0.02):
+                    clock[0] = round(clock[0] + wait, 9)
+                    for key, task in list(engine.active.items()):
+                        if task["due"] > clock[0]:
+                            continue
+                        bundle = task["bundle"]
+                        route, trial, pair = task["request"]
+                        observation = dict(route=route, trial_id=trial, complete=True, status="complete",
+                                           verdict="FAIL" if key == "target-2" and control == "conditional" else "PASS",
+                                           attempt_id="virtual-" + str(len(launches)), _start=task["start"])
+                        bundle.history = getattr(bundle, "history", []) + [observation]
+                        bundle.completed += 1
+                        if pair:
+                            bundle.pairs[pair]["attempts"][route] = observation
+                        bundle.active = None
+                        del engine.active[key]
+                        bundle.advance(observation)
+                        return True
+                    return False
+
+                try:
+                    with mock.patch.object(engine, "launch", launch), mock.patch.object(engine, "read_ready", read_ready):
+                        engine.run_cautious_targets()
+                finally:
+                    engine.selector.close()
+                    engine.temp.cleanup()
+                self.assertEqual([x[0] for x in launches[:2]], ["target-1", "target-2"])
+                if control == "conditional":
+                    # Alpha's next Tor trial is pending unpaired work; beta's
+                    # conditional direct partner takes the first freed slot.
+                    self.assertEqual(launches[2][:2], ("target-2", "direct"))
+                else:
+                    # Both ready partners win before gamma is admitted.
+                    self.assertEqual([x[0] for x in launches[2:4]], ["target-2", "target-1"])
+                    gamma_start = next(i for i, x in enumerate(launches) if x[0] == "target-3")
+                    self.assertGreaterEqual(gamma_start, 4)
+                self.assertTrue(all(b[3] - a[3] >= 0.25 - 1e-9 for a, b in zip(launches, launches[1:])))
+                self.assertTrue(all(r["state"] == "complete" for r in records if r["type"] == "bundle_end"))
+
+    def test_cautious_terminal_precedence_and_independent_coverage(self):
+        specification = importlib.util.spec_from_file_location("measurement_terminal_subject", ROOT / "check_tor_measure.py")
+        coordinator = importlib.util.module_from_spec(specification)
+        specification.loader.exec_module(coordinator)
+        for fault in ("error_after_stop", "cancel_after_stop", "cleanup", "late_cancel", "terminal_output"):
+            with self.subTest(fault=fault):
+                self.clear_logs()
+                coordinator.CANCELLED = 0
+                records = []
+                stopped = fault.endswith("after_stop")
+                self.input.write_text("alpha.example.test\nALPHA.example.test./duplicate\nbeta.example.test\n" if stopped else "alpha.example.test\n")
+
+                class CaptureWriter:
+                    failed = False
+                    def __init__(self, common):
+                        self.common = common
+                    def emit(self, kind, **fields):
+                        if fault == "error_after_stop" and kind == "bundle_start" and fields["target_id"] == "target-3":
+                            raise coordinator.Failure("synthetic unrelated failure")
+                        if fault == "terminal_output" and kind == "run_end":
+                            self.failed = True
+                            raise coordinator.OutputFailure("synthetic missing terminal")
+                        records.append(dict(self.common, type=kind, **fields))
+                        if fault == "cancel_after_stop" and kind == "target_omission":
+                            coordinator.CANCELLED = signal.SIGTERM
+                    def restore(self):
+                        pass
+
+                options = ["--execution-policy", "paired-cautious", "--trials", "1",
+                           "--control", "always", "--control-scope", "trial", str(self.input)]
+                with mock.patch.object(coordinator, "Writer", CaptureWriter):
+                    engine = coordinator.Engine(coordinator.arguments(options), coordinator.load_targets(self.input))
+                original_cleanup = engine.cleanup
+
+                def cleanup():
+                    original_cleanup()
+                    if fault == "cleanup":
+                        raise OSError("synthetic late cleanup failure")
+                    if fault == "late_cancel":
+                        coordinator.CANCELLED = signal.SIGTERM
+
+                with mock.patch.dict(os.environ, dict(self.environment, MEASUREMENT_TEST_PLAN=json.dumps(
+                    {"https://alpha.example.test": [{"code": 429}]} if stopped else {}
+                ))), mock.patch.object(engine, "cleanup", cleanup):
+                    engine.env.update(os.environ)
+                    code = engine.run()
+                if fault == "terminal_output":
+                    self.assertEqual(code, 1)
+                    self.assertEqual(self.select(records, "run_end"), [])
+                    self.assertTrue(all(x["complete"] for x in self.select(records, "attempt_end")))
+                    continue
+                end = records[-1]
+                self.assertEqual(end["state"], "interrupted" if "cancel" in fault else "error")
+                self.assertEqual(code, 143 if "cancel" in fault else 1)
+                self.assertFalse(end["complete"])
+                self.assertEqual(end["policy_truncated"], stopped)
+                self.assertEqual(end["schedule_complete"], not stopped)
+                if stopped:
+                    self.assertEqual(end["omission_counts"]["known_required"], 3)
+                    self.assertEqual(end["schedule_accounting"]["known_required_unresolved"], 2)
+                    self.assertEqual(end["target_states"][1]["state"], "not_started")
+                else:
+                    self.assertEqual(end["schedule_accounting"]["known_required_unresolved"], 0)
+                self.assert_accounting(records)
+                self.assert_clean()
+        coordinator.CANCELLED = 0
+
+    def test_cautious_direct_first_failure_keeps_first_tor_requirement(self):
+        specification = importlib.util.spec_from_file_location("measurement_retry_subject", ROOT / "check_tor_measure.py")
+        coordinator = importlib.util.module_from_spec(specification)
+        specification.loader.exec_module(coordinator)
+        args = coordinator.arguments([
+            "--execution-policy", "paired-cautious", "--circuits", "3",
+            "--control", "always", "--order", "direct-first", str(self.input),
+        ])
+        bundle = coordinator.Bundle(coordinator.load_targets(self.input)[0], args)
+        bundle.advance()
+        self.assertEqual(bundle.pending[0], "direct")
+        # A launched direct request failed or was aborted before the first Tor
+        # observation. Its failure cannot erase the unconditional first Tor.
+        bundle.last_request, bundle.pending = bundle.pending, None
+        engine = object.__new__(coordinator.Engine)
+        engine.args = args
+        known, unknown = engine.remaining_work(bundle)
+        self.assertEqual(sum(x["count"] for x in known), 2)
+        self.assertEqual(sum(x["count"] for x in unknown), 2)
+        self.assertEqual(known[0]["route"], "tor")
+        self.assertEqual(known[0]["trial_range"], [1, 1])
+        self.assertEqual(unknown[0]["trial_range"], [2, 3])
+
+    def test_cautious_validation_before_input_and_unnecessary_controls(self):
+        status, rows, error = self.run_scan(
+            "--execution-policy", "invalid", input_path=self.temp / "nonexistent.txt"
+        )
+        self.assertEqual(status, 2)
+        self.assertIn("invalid choice", error)
+        self.assertEqual(rows, [])
+        self.assertEqual(self.calls(), [])
+        status, rows, error = self.run_scan(
+            "--execution-policy", "paired-cautious", "--trials", 3,
+            "--control", "conditional", "--control-scope", "trial",
+        )
+        self.assertEqual(status, 0, error)
+        self.assertEqual(rows[-1]["schedule_accounting"]["known_unnecessary"], 3)
+        self.assertEqual(rows[-1]["schedule_accounting"]["known_required_unresolved"], 0)
+        self.assertTrue(rows[-1]["schedule_complete"])
+        self.assert_accounting(rows)
 
     def test_closed_stdout_stops_and_reaps(self):
         process = self.spawn(

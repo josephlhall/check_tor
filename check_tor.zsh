@@ -175,6 +175,8 @@ usage() {
     print -r -- "  --reproducible            Explicit proxy routing; trial policies imply it."
     print -r -- "  --workers COUNT          Active target bundles, 1–32 (default: 1)."
     print -r -- "  --start-gap SECONDS       Global probe-start interval, 0–3600 (default: 0)."
+    print -r -- "  --execution-policy legacy|paired-cautious  Default: legacy."
+    print -r -- "    paired-cautious prioritizes ready partners and stops a hostname after HTTP 429."
     print -r -- ""
     print -r -- "Redirect-limit stops leave subsequent access unobserved; preflight follows no redirects."
     print -r -- "jsonl-v2 adds bounded hop evidence; see DETAILED-OUTPUT.md for limits and privacy."
@@ -186,6 +188,8 @@ usage() {
     print -r -- "Exit status:"
     print -r -- "  0  Scan completed, regardless of findings."
     print -r -- "  1  Invocation, input, dependency, or Tor preflight failure."
+    print -r -- "  2  Invalid detailed-mode arguments."
+    print -r -- "  3  Detailed paired-cautious policy omitted work after HTTP 429."
 }
 
 parse_bounded_integer() {

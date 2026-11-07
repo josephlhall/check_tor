@@ -49,7 +49,7 @@ mode additionally requires Python 3.9 or newer (standard library only).
 
 ## Setup
 
-1. Keep `check_tor.zsh`, `check_tor_core.zsh`, and `scripts/` together; detailed mode also needs `check_tor_probe.zsh` and `check_tor_measure.py` alongside them. Copy `targets-EXAMPLE.txt` to create your own list. Keep real target lists **outside** this repository—see [Handling target lists](#handling-target-lists).
+1. Keep `check_tor.zsh`, `check_tor_core.zsh`, and `scripts/` together; detailed mode also needs `check_tor_probe.zsh`, `check_tor_measure.py`, and `check_tor_retry.py` alongside them. Copy `targets-EXAMPLE.txt` to create your own list. Keep real target lists **outside** this repository—see [Handling target lists](#handling-target-lists).
 2. Make the script executable:
    ```zsh
    chmod +x check_tor.zsh
@@ -204,21 +204,44 @@ JSONL output contains the scanned targets and is sensitive operational data.
 Store it outside this repository with restrictive permissions; do not add it to
 Git or place it under a publicly accessible path.
 
-### Detailed requests, fixed trials, and bounded concurrency
+### Collecting repeated Tor and direct-connection measurements
 
-`--format jsonl-v2` preserves individual requests and explicit run start/end
-records. With no new policy options, it observes the existing failure retries
-and conditional controls. `--trials` selects a fixed number of observations;
-`--control always --control-scope trial` pairs a direct control with each Tor
-trial, including successful ones. Optional ordering, a recorded seed, partner-gap
-flags, bounded target workers, and global probe-start pacing support repeatable
-schedules. All these policies retain the existing probe and classifier.
+For Internet measurement work, you may want to keep the result of every request,
+repeat a test several times, or compare access through Tor with access over your
+ordinary Internet connection. Use `--format jsonl-v2` to save those observations
+as structured data for later analysis.
 
-This mode requires Python 3.9+ and has its own versioned contract. It does not
-change text output or JSONL v1. Read [Detailed measurement output](DETAILED-OUTPUT.md)
-for examples, supported combinations, record identities, routing guarantees,
-clock and interruption semantics, and limits on interpreting paired results.
-Missing terminal records mean incomplete runs, not successful completion.
+For example, this command makes three requests through Tor for each target,
+each followed by a comparison request without Tor:
+
+```zsh
+./check_tor.zsh --format jsonl-v2 \
+  --trials 3 --control always --control-scope trial \
+  /path/to/targets.txt > /path/to/observations.jsonl
+```
+
+The results include each request's outcome and timing, identify which Tor and
+direct requests belong together, and report whether the scan finished. You can
+also change which connection goes first, scan several hostnames at once, and
+set a minimum interval between requests. These settings help you describe and
+repeat your collection procedure. Repeated requests do not guarantee different
+Tor exits or independent measurements, and direct requests reveal your ordinary
+connection to the target site.
+
+For a more cautious collection policy, add `--execution-policy paired-cautious`.
+This gives the second request in a pair priority when it is ready and stops
+further requests to a hostname after an HTTP 429 (“Too Many Requests”). Other
+hostnames continue. If work was skipped, the output explains what is missing;
+the scanner does not automatically wait and retry. Such a run exits with code
+`3` and reports `state: "policy_stopped"` and `complete: false`. A later scan is a
+separate invocation and never changes the original run's completion status.
+The default `legacy` policy retains the existing schedule. Strict v2 readers
+must recognize the new terminal state and exit code before selecting this policy.
+
+This mode requires Python 3.9 or newer. See
+[Detailed measurement output](DETAILED-OUTPUT.md) for options, examples, and
+guidance on interpreting incomplete scans. Store target lists and results
+outside this repository.
 
 ## Measurement limitations and validation
 
@@ -379,6 +402,7 @@ zsh tests/check_tor_integration_test.zsh
 python3 -m unittest discover -s tests -p 'test_measurement.py'
 python3 -m unittest discover -s tests -p 'test_transport_review.py'
 python3 -m unittest discover -s tests -p 'test_redirects.py'
+python3 -m unittest discover -s tests -p 'test_retry_after.py'
 python3 -m unittest discover -s tests -p 'test_curl_trust.py'
 python3 -m unittest discover -s tests -p 'macos_tls_defaults_test.py'
 git diff --check

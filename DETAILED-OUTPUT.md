@@ -33,7 +33,7 @@ site. Keep output outside the repository with restrictive permissions.
 | Setting | Meaning |
 | --- | --- |
 | No `--trials` | Retry the existing block-like outcomes, stopping on PASS/CERT/WARN or at `--circuits`. |
-| `--trials N` | Make exactly N Tor observations unless the run fails or is interrupted. Successes and CERT/WARN outcomes do not end the sequence. No additional failure retries are added. |
+| `--trials N` | Make exactly N Tor observations unless the run fails, is interrupted, or the explicitly selected cautious policy omits work. Successes and CERT/WARN outcomes do not end the sequence. No additional failure retries are added. |
 | `--control conditional` | Make a direct control only when the associated Tor result is block-like. This is the default. |
 | `--max-redirects N` | Follow at most `0`–`100` redirects per Tor/direct target probe; default `10`. Available in every output mode. |
 | `--control always` | Make the control even after a successful Tor result. |
@@ -44,6 +44,7 @@ site. Keep output outside the repository with restrictive permissions.
 | `--order direct-first` | With always-controls, run direct first. For target-scoped controls this precedes the whole Tor sequence. |
 | `--order counterbalanced --seed N` | Choose reproducible order independently of outcomes, circuit tags, and worker completion order. Requires always-controls. |
 | `--max-partner-gap S` | Maximum start-to-start time for each-trial partners, in seconds; default 60. Observations exceeding it remain in the output with a late flag. |
+| `--execution-policy legacy\|paired-cautious` | Default `legacy`. `paired-cautious` prioritizes ready pair partners and stops an input hostname after explicit HTTP 429. |
 | `--workers N` | At most N active target bundles, from 1 to 32; default 1. |
 | `--start-gap S` | Global minimum interval between coordinator probe invocations, in seconds, from 0 to 3600; default 0. |
 | `--run-id TEXT`, `--group-id TEXT` | Optional opaque caller labels. They do not replace the scanner's internal execution identity. |
@@ -155,7 +156,11 @@ though access failed. `tor_verified` applies only to preflight; it is null on
 target observations. A missing verdict-count key means zero occurrences.
 
 Consumers may ignore additional optional fields within v2. Removing fields or
-changing their types or meanings requires a new schema version. Do not parse
+changing their types or meanings requires a new schema version. The explicitly
+selected `paired-cautious` policy extends v2 with a new terminal state
+`policy_stopped` and exit code `3`. This expands existing value domains, beyond
+optional-field additions; strict readers must support these before opting in.
+Existing values retain their meanings. Do not parse
 human `detail` strings to recover fields or use them as stable classifications.
 
 UTC timestamps describe civil time and may move if the system clock changes.
@@ -234,6 +239,123 @@ when curl is scheduled by the OS, opens a socket, sends a packet, or follows a
 redirect. Redirect hops are outside this rate guarantee. Workers share the
 local Tor process and network capacity. Hostname serialization and global pacing
 are not provider-level throttling: different names may reach the same service.
+
+## Cautious collection and completion
+
+`--execution-policy paired-cautious` is an opt-in detailed-mode contract. It
+implies reproducible routing, preserves selected pair order and control rules,
+and records its effective value in `run_start.settings.execution_policy`.
+`legacy` keeps the existing schedule. The policy does not automatically sleep,
+retry, replace observations, resume, or combine outcomes from several runs.
+
+At each eligible launch, the coordinator processes available completions and
+prefers a ready second pair member over new-target or unpaired work. Pacing,
+worker ceilings, sequential routes, and whole-bundle hostname serialization
+still apply. A slow first member is not preempted; priority promises no maximum
+partner gap. `observed_start_gap_seconds` and `late` remain start-to-start facts.
+
+A completed explicit HTTP 429 on either route stops unlaunched work for the
+normalized input hostname, including later input occurrences. Case, trailing
+dots, and ports use the existing hostname matching. Redirects do not broaden
+this to other hostnames or providers. HTTP 503, response body text, certificate
+failures, and timeouts do not trigger the stop. Unrelated hostnames continue.
+Missing or bad retry metadata cannot prevent a 429 stop.
+
+A completed 429 remains a complete native observation. A suppressed partner is
+missing, not aborted, and has no invented attempt ID. A shortened bundle stays
+`partial`; a suppressed occurrence that never starts stays `not_started`.
+
+The policy records bounded omission descriptions tied to the triggering
+attempt. Known-required requests are distinguished from future controls/retry
+opportunities whose eligibility was never determined. Planned request counts
+remain upper bounds; subtracting issued requests does not count actual skipped
+requests. Three always-controlled pairs stopped on their first Tor request
+have one issued/completed request and five known-required omissions.
+
+| Invocation outcome | `state` | `complete` | Exit code |
+| --- | --- | --- | --- |
+| Required observations and invocation finished | `complete` | `true` | `0` |
+| Policy omitted work; remaining work finished normally | `policy_stopped` | `false` | `3` |
+| Runtime, setup, output, or cleanup failure | `error` | `false` | `1` |
+| Handled interruption without overriding fatal failure | `interrupted` | `false` | `130` / `143` |
+
+The cautious policy adds independent `run_end.schedule_complete` and
+`policy_truncated` booleans. Schedule coverage means all required observations
+finished; controls established as unnecessary are not missing work. Policy
+truncation means the policy actually omitted work. Failure/interruption takes
+precedence in the terminal state while earlier omission evidence remains.
+Cleanup can fail after all observations finish: `schedule_complete` can then
+be true while `complete` is false. A last-request 429 that omits nothing permits
+normal completion, with `policy_truncated: false`.
+
+For a 700-domain run, a single hostname stop can therefore make the invocation
+incomplete without invalidating the other 699 domains' observations. A later
+invocation has a new identity and never revises this result. A later 200 does
+not by itself complete even that new invocation; its requested schedule must
+finish. Combining observations into a study is a caller decision.
+
+A synthetic consumer should accept exit `3` as a policy outcome only with a
+valid matching terminal record, keep usable observations, and inspect omissions
+before deciding whether to invoke the scanner again. Require exit `0` plus a
+valid complete terminal record for full successful execution. An absent,
+truncated, or contradictory terminal record is incomplete evidence, even if
+an earlier attempt succeeded. Failures and signals retain their significance.
+
+### Cautious policy machine fields
+
+| Record | Additional fields |
+| --- | --- |
+| `hostname_stop` | Normalized `hostname`, `triggering_attempt_id`, `triggering_target_id`, `route`, `http_status`. Emitted even if nothing remains to omit. |
+| `target_omission` | Target identity, stop reason/trigger fields, and compact `known_required` / `eligibility_undetermined` lists. |
+| `pair_end` | `missing_reason` identifies the hostname stop when it withheld a partner. |
+| `bundle_end` | Optional `omission` retains that target's stop and omission description. |
+| `run_end` | `schedule_complete`, `policy_truncated`, `hostname_stops` count, `omission_counts`, and `schedule_accounting`. |
+
+Each range descriptor contains `route`, inclusive `trial_range: [first, last]`,
+`count`, and a structured `description`. In retry mode these ranges identify
+potential attempt ordinals, not invented fixed-trial IDs. Once-per-target
+controls use `scope: "target"` and `count: 1` instead of a trial range.
+`omission_counts` has `known_required` and `eligibility_undetermined` totals.
+`schedule_accounting` distinguishes `known_required_omitted`,
+`eligibility_undetermined_omitted`, `known_required_unresolved`,
+`eligibility_undetermined_unresolved`, and `known_unnecessary`. Unresolved
+requirements can include launched observations that failed to complete; these
+counts are not another count of issued requests. Native issued/completed counts
+remain separate. Required versus undetermined is about eligibility, not whether
+an eventual request would succeed.
+
+### Retry-After evidence
+
+Target/control `attempt_end.retry_after` describes only the final visited
+response. It is additive in detailed output, independent of the selected
+execution policy. Status 429/503 can have retry evidence; other statuses are
+`not_applicable`. `state` is `usable`, `absent`, `invalid`, `unavailable`,
+`truncated`, or `not_applicable`; `reason` explains syntax, duplicates, overflow,
+missing/mismatched/incomplete response blocks, or the finite bound encountered.
+No raw header values or other arbitrary headers are exported.
+
+Usable evidence contains `form` (`delay_seconds` or `http_date`), `units:
+"seconds"`, `wait_seconds`, `reference_time_utc`, `reference_basis`, and
+`clock_uncertainty`. Delay-seconds are anchored at observation completion,
+conservatively later than receipt. HTTP dates also contain `not_before_utc` and
+`past_date`; the wait rounds a positive date difference upward to whole seconds.
+A zero or past date produces zero by the stated clock. An unavailable comparison
+clock produces no guessed wait. UTC wall clocks may move, and the local/server
+clock offset is unknown; a caller must choose its fallback for unusable evidence
+and its own allowance for clock uncertainty. A parsed wait never promises that
+a later request will succeed.
+
+The parser accepts HTTP's three date forms (IMF-fixdate and obsolete RFC850 and
+asctime forms); RFC850 two-digit years use the completion-relative fifty-year
+rule. Grammar, calendar/date range, duplicate fields, numeric range, and capture
+bounds have distinct failure reasons. Maximum retained wait is 2147483647
+seconds; excessive values are rejected rather than clamped. Extraction examines
+at most 262144 private header bytes, 256 response blocks, 4096 lines, 256 bytes
+per retry value, and 100 followed redirects; retained evidence is at most 2048
+serialized bytes. URL comparison is bounded to 8192 UTF-8 bytes. The effective
+bounds are recorded in `settings.retry_after_bounds`. Interim, CONNECT, earlier
+redirect, and unvisited response metadata cannot supply the final retry value.
+Header files remain private and are removed with the observation directory.
 
 ## Failure, interruption, and sensitive data
 
