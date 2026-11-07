@@ -1,53 +1,134 @@
 # Task-Based Reference Experiment Preparation Packet
 
+One existing test endpoint can advance to readiness review. Four other
+conditions still need endpoint construction and operator permission, and may
+be deferred. The owner approved offline preparation with a budget of zero
+remote requests. A later manifest must identify the endpoints and receive
+explicit authority before live preflight or collection.
+
 > **Issue:** [#39](https://github.com/josephlhall/check_tor/issues/39)
 >
-> **Protocol:** [`TACP-0.3`](VALIDATION-REFERENCE-PROTOCOL.md)
+> **Protocol:** [`TACP-0.4`](VALIDATION-REFERENCE-PROTOCOL.md)
 >
 > **Status:** APPROVED PREPARATION PACKET — no live authority
 >
-> **Owner approval:** Communicated 2026-09-25 UTC for the protocol identity,
-> timing, condition dispositions, planning budget, and interpretation rules
+> **Owner approval:** Original preparation approved 2026-09-25 UTC. The
+> `TACP-0.4` timing and browser-comparison revision was approved 2026-11-07;
+> condition dispositions and the planning budget remain unchanged.
 >
 > **Scanner baseline reviewed:** `567faea7ab4e65ebdc8d3176169e98d5ab4ff8d5`
 
-This packet prepares reference observations; it is not a collection manifest
-and contains no approved live endpoint list. The completed
-[`TACP-0.2` pilot](VALIDATION-PILOT-RESULTS.md) remains historical evidence.
-Its 26 purposively selected cases included no browser `FRICTION` or
-`SEVERELY_DEGRADED` outcome. All three `CHALLENGE` cases used synthetic HTTP
-202 responses, and the single observed Tor Browser disadvantage coincided
-with scanner `PASS`. Those facts motivate these conditions but do not predict
-their results. This preparation changed no scanner code or JSONL schema at
-the reviewed baseline above. Its approved instrument remains schema version 1
-(`--format jsonl`); later scanner capabilities, including
-[`--format jsonl-v2`](DETAILED-OUTPUT.md), do not amend this packet or grant
-live authority.
+In the [completed pilot](VALIDATION-PILOT-RESULTS.md), none of the 26
+deliberately selected cases produced browser `FRICTION` or
+`SEVERELY_DEGRADED`. All three `CHALLENGE` cases used purpose-built HTTP 202
+responses, and the only observed Tor Browser disadvantage coincided with
+scanner `PASS`. Those findings explain why the packet proposes the
+conditions below. The expected outcomes are hypotheses for a later study.
+
+The preparation kept the reviewed scanner and its schema version 1 output
+(`--format jsonl`) as the instrument. Using a later scanner capability, such
+as [`--format jsonl-v2`](DETAILED-OUTPUT.md), would require an approved
+protocol revision.
 
 ## Reference-condition specifications
 
-The expectations below come from a documented service purpose or a proposed
-controlled configuration, **never** from a desired scanner verdict. A
-configuration that has not been built or reviewed is a specification, not
-verified evidence. `Future preflight` means eligible for a later readiness
-review, not ready for traffic. A controlled endpoint may remain deferred if
-construction, permission, or an independent expectation basis is unavailable.
+Before a case, document what the endpoint is intended to do using its
+operator's documentation or a reviewed configuration. This gives the
+reviewer an expectation independent of the scanner verdict being tested.
+A proposed configuration describes a condition to build. Review the
+configuration and verify eligibility before using it as evidence. A condition
+can stay deferred if construction, permission, or independent evidence is
+unavailable.
 
-| ID and condition | Hypothesis and expected instruments | Independent basis and public task | Disposition and limits |
-|---|---|---|---|
-| `REF-NORMAL`: ordinary content with working navigation | A documented simple page and its first-party link should complete in both browsers; scanner may return `PASS`, but no verdict is guaranteed. | Existing [`HTTPBIN-LINKS-2`](REFERENCE-ENDPOINTS.md#httpbin-links-2) catalog record and documented public test-service purpose. Load `/links/2`, identify its simple content, follow the first displayed first-party link. | **Future preflight.** New approval and current verification are required. This is simple controlled content, not an ordinary-site prevalence sample. Content, redirects, and service availability may change. |
-| `REF-202`: intelligible HTTP 202 status without challenge | A fixed 202 should exercise the scanner's `CHALLENGE` branch while browsers can complete a status-information task without a challenge. This is a proposed semantic disagreement, not a prediction of access friction. | [RFC 9110 §15.3.3](https://www.rfc-editor.org/rfc/rfc9110.html#section-15.3.3) defines 202; controlled route configuration must independently specify 202 and a human-readable accepted/pending explanation. Task: read that explanation; navigation not applicable. | **Requires construction and operator authorization.** The pilot's httpbin `/status/202` is documented to return 202 but produced an empty browser task; it cannot establish this condition's intelligible page. Keep the configured status and task versioned. No challenge mechanism is inferred from 202. |
-| `REF-CHALLENGE`: authorized challenge protecting meaningful content | A managed challenge may pass automatically, produce friction, or reach a prohibited interaction boundary. The scanner may classify challenge-like responses, but its JSONL v1 record alone cannot prove the live header or browser result. | Minimum infrastructure: operator-authorized HTTPS page with low-sensitivity static content and a documented, path-scoped managed challenge rule; task is reaching that content and one harmless first-party navigation if authorized. Rule/configuration review is the independent expectation basis. [Cloudflare's challenge-response documentation](https://developers.cloudflare.com/cloudflare-challenges/challenge-types/challenge-pages/detect-response/) describes an explicit header, but this packet does not collect that header. | **Requires construction and operator permission.** No such endpoint is approved. Dynamic challenge selection is a confounder; interactive solving is prohibited. [Deterministic Turnstile test keys](https://developers.cloudflare.com/turnstile/troubleshooting/testing/) would test their own flow, not establish managed challenge behavior. |
-| `REF-CLIENT`: documented client-dependent refusal that a browser can pass | A fixed rule should refuse the unchanged scanner request on both Tor and direct paths while permitting the predeclared browser task. A scanner `FAIL` plus browser success would be a pessimistic task comparison without automated Tor disadvantage. | Minimum operator-controlled static page with a versioned deterministic rule based on a documented difference in the actual unmodified client request profiles; task is content plus one safe link. Configuration, request-profile review, and an independent rule check establish the expectation before observation. | **Requires construction and permission; defer if a stable discriminator cannot be justified.** The scanner already sends browser-like headers; a guessed `User-Agent` rule is inadequate. Browser/client version drift and exit variation must be recorded. |
-| `REF-TOR-DIFF`: documented Tor-versus-clearnet difference | A configured rule may refuse a Tor-classified request and permit a direct request. Compare scanner Tor/control fields and both browser tasks separately; a difference in one comparison does not establish the other. | Minimum operator-controlled static page and a versioned, reviewable rule plus current classification source and rule snapshot. Same harmless public task for both browsers. The configuration, rather than a scanner result, is the expectation basis. | **Requires construction and permission; defer if current classification cannot be reviewed.** Scanner and Tor Browser need not share an exit; exit membership and other edge conditions change. No same-exit experiment is planned. |
+| Condition | Status |
+|---|---|
+| [`REF-NORMAL`](#ref-normal-ordinary-content-with-working-navigation) | Candidate for later preflight, subject to current verification and new approval |
+| [`REF-202`](#ref-202-intelligible-http-202-status) | Requires construction and operator authorization |
+| [`REF-CHALLENGE`](#ref-challenge-managed-challenge) | Requires construction and operator permission |
+| [`REF-CLIENT`](#ref-client-client-dependent-refusal) | Requires construction, permission, and a stable rule that distinguishes the clients |
+| [`REF-TOR-DIFF`](#ref-tor-diff-tor-versus-direct-requests) | Requires construction, permission, and a reviewable Tor classification rule |
 
-For each future case, complete the existing
-[catalog schema](REFERENCE-ENDPOINTS.md#catalog-schema): lifecycle, visibility,
-control, authorization, publication sensitivity, expectation basis, expected
-instrument behavior, stability, statefulness, interaction limit, verification
-method/date, owner/contact, and retirement trigger. These condition IDs are
-planning labels; only `HTTPBIN-LINKS-2` is an existing eligible catalog entry.
-No new endpoint receives a `verified` lifecycle merely by appearing here.
+### `REF-NORMAL` Ordinary content with working navigation
+
+Use the documented public test-service purpose and the existing catalog entry
+as the evidence for the expected behavior. The task is to load `/links/2`,
+identify the page's simple content, and follow the first displayed first-party
+link. Both browsers should complete that task. The scanner may return `PASS`.
+This controlled example tests simple navigation. Content, redirects, and
+service availability can change, so verify the entry again before seeking
+approval for live use. [Catalog entry `HTTPBIN-LINKS-2`](REFERENCE-ENDPOINTS.md#httpbin-links-2)
+
+### `REF-202` Intelligible HTTP 202 status
+
+Configure a route to return HTTP 202 with a human-readable explanation that the
+request was accepted or is pending. Record the configured status and task with
+their versions. The browser task is to read the explanation. Navigation is
+not applicable. The configured response should exercise the scanner's
+`CHALLENGE` rule while allowing the browser task to succeed without a challenge.
+That would be a disagreement in what the label means for the task. HTTP 202
+alone provides no evidence of a challenge mechanism or browser friction.
+[RFC 9110 §15.3.3](https://www.rfc-editor.org/rfc/rfc9110.html#section-15.3.3)
+
+The pilot's documented httpbin `/status/202` route produced an empty page in
+both browsers. This condition needs a purpose-built, intelligible page and
+operator authorization.
+
+### `REF-CHALLENGE` Managed challenge
+
+Use an operator-authorized HTTPS page with low-sensitivity static content and
+a documented managed challenge rule limited to that path. Review the rule and
+configuration to establish what to expect. The task is to reach the content
+and complete one harmless first-party navigation if authorized.
+
+A challenge may finish automatically, cause friction, or present an interaction
+the protocol prohibits. Dynamic challenge selection can make observations
+vary. Stop at a prohibited interaction under the reference protocol. The
+scanner may classify a response as challenge-like, but JSONL v1 does not show
+the live challenge header or the browser outcome. Cloudflare documents a
+challenge-response header. The approved packet does not collect that header.
+Deterministic Turnstile test keys would exercise their own flow, so evidence
+for a managed challenge requires a managed challenge rule. Construction and
+operator permission are pending.
+[Cloudflare challenge-response documentation](https://developers.cloudflare.com/cloudflare-challenges/challenge-types/challenge-pages/detect-response/) · [Turnstile test documentation](https://developers.cloudflare.com/turnstile/troubleshooting/testing/)
+
+### `REF-CLIENT` Client-dependent refusal
+
+Use an operator-controlled static page with a versioned rule that
+deterministically distinguishes a documented difference in the actual,
+unmodified client request profiles. Review the configuration and request
+profiles, then check the rule independently before observing the case. The
+browser task is to reach the page content and follow one safe link.
+
+The rule should refuse the unchanged scanner request on both the Tor and
+direct paths while allowing the browser task. A scanner `FAIL` alongside
+browser success would be a pessimistic task comparison without an automated
+Tor disadvantage. The scanner already sends browser-like headers, so a guessed
+`User-Agent` distinction is insufficient. Record browser or scanner
+version changes and exit variation. Defer the condition if the project cannot
+justify a stable way to distinguish the clients.
+
+### `REF-TOR-DIFF` Tor versus direct requests
+
+Use an operator-controlled static page with a versioned, reviewable rule.
+Record the current Tor classification source and a snapshot of the rule.
+The configuration establishes what to expect. A rule may refuse a request it
+classifies as Tor and permit a direct request. Give both browsers the same
+harmless public task.
+
+Compare the automated Tor and direct results separately from the two browser
+outcomes. A difference in one comparison does not establish the other. The
+scanner and Tor Browser may use different exits, and exit membership and edge
+conditions can change. The plan does not include a same-exit experiment. Defer
+the condition if the current classification source cannot be reviewed.
+
+For each future case, complete the [catalog schema](REFERENCE-ENDPOINTS.md#catalog-schema).
+Record the lifecycle state, visibility, who controls the endpoint, authorization,
+publication sensitivity, evidence for the expected instrument behavior,
+stability, whether previous requests or session state can affect later results,
+interaction limit, verification method and date, owner and contact, and what
+would retire the entry. The condition IDs are
+planning labels. `HTTPBIN-LINKS-2` is the only existing eligible catalog
+entry. Assign new endpoints a verified state only after verifying them.
 
 ## Approved planning shape and traffic accounting
 
@@ -87,7 +168,7 @@ revision before any new traffic.
 The approved planning ceiling per case is one scanner invocation: **one** Tor
 preflight request to `check.torproject.org`, up to **three** Tor endpoint attempts, and
 up to **one** conditional direct clearnet endpoint request. A first `PASS`
-stops scanner retries; `CERT` and `WARN` also stop under current code. Each
+stops scanner retries; `CERT` and `WARN` also stop at the reviewed scanner baseline. Each
 browser gets one direct load, at most one rule-triggered reload, and at most
 one approved first-party navigation: up to **three top-level actions per
 browser**. Thus the seven-case maximum budgets at most **7 preflight + 21 Tor
@@ -115,7 +196,7 @@ every value below before separately authorizing any live preflight or case:
 
 | Gate | Value to freeze or decision required |
 |---|---|
-| Protocol and approval | `TACP-0.3` revision, review date, reviewer, accepted timing and interpretation rules, unresolved conditions |
+| Protocol and approval | `TACP-0.4` revision, review date, reviewer, accepted timing and interpretation rules, unresolved conditions |
 | Case selection | Approved catalog entry IDs, exact URLs kept private when required, independent expectation evidence and date, public task/navigation, authorization, association/publication review, lower entry limit, final slot/order/repeats |
 | Instrument and host | Scanner commit and exact options, JSONL schema, OS and tool versions, Tor/Tor Browser and ordinary-browser versions, security level, time sync, observer mode, fresh-state controls |
 | Traffic | Per-case and aggregate ceiling, any lower endpoint limit, redirect/subresource weight assessment, exact preflight request/action budget, stopping and no-substitution rules |
@@ -133,16 +214,22 @@ required gate for the selected cases is resolved.
 Enter browser task facts and rubric outcomes before agreement or mechanism
 interpretation. Retain a private case row under the stewardship policy; a
 public result may show only reviewed aggregates or deliberately public cases.
-The table below defines the analytical projection, not a replacement for
-[`TACP-0.2` fields](VALIDATION-PROTOCOL.md#observation-record).
+The table below summarizes the analysis record. Retain the
+[`TACP-0.2` base fields](VALIDATION-PROTOCOL.md#observation-record) with the
+prospective additions below. For `TACP-0.4`, deadline expiry is distinct from
+observed stability: retain the affected action and expiry in the structured
+note, and use null with a reason for that action's unobserved stable time.
+Retain later stability after a permitted reload. The browser-level stable-time
+field is null only if no stable final task outcome was observed. This
+prospective recording rule does not recode historical records.
 
 | Layer | Fields and rule |
 |---|---|
 | Predeclared case | `case_id`, `condition_id`, `catalog_entry_id`, `endpoint_group_id`, `protocol_id`, expectation source/version/date, approved task, planned order, repeat link, approval/authorization, limits |
 | Direct scanner | Target JSONL record or explicit `NO_TARGET_RECORD` reason; preserve exact `verdict`, `tor_attempts`, `tor_attempt_limit`, `clearnet_control` object, nullable `tor_specific`, `body_limited`, schema version, timestamps, and raw-artifact reference outside Git. `detail` is contextual prose, not a parser input. |
-| Browser facts | Separate Tor/ordinary task records: start/end, first meaningful and stable seconds, permitted reload trigger, navigation result, meaningful content, visible challenge and automatic completion, `interaction_boundary`, `technical_failure_observed`, observer exposure, uncertainty, and independent rubric outcome. |
+| Browser facts | Separate Tor/ordinary task records: start/end, per-action content/navigation and stable seconds, wait-limit expiry and affected action, permitted reload trigger, navigation result, meaningful content, visible challenge and automatic completion, `interaction_boundary`, `technical_failure_observed`, observer exposure, uncertainty, and independent rubric outcome. |
 | Automated comparison | `AUTOMATED_TOR_WORSE`, `SAME_OR_NOT_WORSE`, or `UNDETERMINED`, based only on a performed, conclusive scanner clearnet control and the preserved `tor_specific` value; record `NOT_PERFORMED` distinctly when absent. |
-| Browser comparison | `TOR_BROWSER_WORSE`, `SAME_TASK_OUTCOME`, `ORDINARY_BROWSER_WORSE`, or `UNDETERMINED`, based on the two frozen-task outcomes and their specific friction/degradation evidence. |
+| Browser comparison | `TOR_BROWSER_WORSE`, `SAME_TASK_OUTCOME`, `ORDINARY_BROWSER_WORSE`, or `UNDETERMINED`, based on the two outcome categories. Missing or inconclusive observations give `UNDETERMINED`; matching conclusive categories give `SAME_TASK_OUTCOME`. Retain times and impediments separately without ranking within a category. |
 | Interpretation | Scanner-to-Tor-Browser category (`STRONG_AGREEMENT`, `ACCEPTABLE_SEMANTIC_AGREEMENT`, prospective `SEMANTIC_DISAGREEMENT`, `SCANNER_PESSIMISTIC`, `SCANNER_OPTIMISTIC`, or `INCONCLUSIVE`), evidence statement, likely and alternative mechanism as hypotheses, confidence, deviations, and reviewer decision. Do not use a mechanism-hypothesis label as if it were observed agreement. |
 
 Use JSON `null` for an unobserved or unknown value, with a reason field; use
@@ -168,10 +255,24 @@ means the automated clearnet control, not the ordinary browser.
 | Differential treatment | `FAIL`, `tor_attempts=3`; control `PASS`, `tor_specific=true` | `BLOCKED` / `NORMAL` with the same task and no prohibited interaction | Automated Tor disadvantage and observed Tor Browser disadvantage are separate findings; the configured rule supports the reference expectation but does not prove every Tor exit behaves alike. |
 | Inconclusive | No target JSONL because scanner preflight failed; control not performed, nullable target fields remain null | `INCONCLUSIVE` / `NORMAL` after an origin instability note | No scanner agreement or differential-treatment claim; retain the attempted case and deviation without replacement. |
 
+The following timing examples exercise `TACP-0.4`; they are invented, not new
+observations or revisions to the completed pilot:
+
+| Example | Recording and interpretation |
+|---|---|
+| Content appears at 5 seconds and stays unchanged | Confirm stability at 8 seconds and advance to the next permitted step; no need to wait until 30. |
+| Content appears at 7 seconds and is stable at 10 | Record both times. The delay is 7 seconds, so confirmation alone does not produce `FRICTION`; another impediment still can. |
+| Content first appears at 29 seconds | Stop that action's observation at 30. Record the appearance and wait-limit expiry; stability remains unobserved, with a null stable time and reason. Do not extend to 32 seconds or infer blocking from expiry alone. |
+| A permitted reload is still loading at 30 seconds | Record expiry without claiming a stable result. Do not reload again; classify only the available evidence. |
+| A required step has a 25-second delay in Tor Browser and a 12-second delay in the ordinary browser; both tasks then complete | Both are `FRICTION`; compare as `SAME_TASK_OUTCOME`. Delays are per step and exclude stability confirmation, not total task durations. Retain both times without claiming equal speed or ranking within the category. |
+
 If an interactive challenge appears, a further synthetic variant records
 `interaction_boundary=PROHIBITED` and stops the case without solving it. The
 observed task may be classified `BLOCKED` under the permitted-action rule;
-the paired comparison is `INCONCLUSIVE` if another instrument is missing. Its
+the overall case comparison is `INCONCLUSIVE` if another instrument is
+missing. If a browser record is missing, the separate browser-to-browser
+comparison is `UNDETERMINED`. A missing scanner alone does not invalidate a
+comparison between two completed browser records. The observed browser
 `technical_failure_observed` remains `false` or null according to direct
 evidence; success after interaction is unknown.
 
@@ -179,11 +280,11 @@ evidence; success after interaction is unknown.
 
 | Decision | Current state |
 |---|---|
-| Owner review and date | Approved in this session, 2026-09-25 UTC |
-| Protocol identity and timing rules | `TACP-0.3` approved for preparation; 30-second initial/reload/navigation limits, 10-second delay threshold, 3-second stability rule, 15-minute paired window |
+| Owner review and date | Original packet approved 2026-09-25 UTC; prospective timing and comparison revision approved 2026-11-07 |
+| Protocol identity and timing rules | `TACP-0.4`: advance after observed three-second stability; hard 30-second action limits with expiry recorded separately; ten-second delay excludes confirmation time; 15-minute paired window unchanged |
 | Condition dispositions | One future-preflight candidate; four construction/permission conditions, with deferral allowed; approved as preparation dispositions |
 | Collection shape and resource budget | At most seven analytic cases and zero remote requests during preparation; approved planning ceiling, not live traffic authority |
-| Interpretation and synthetic walk-through | Approved, including prospective `SEMANTIC_DISAGREEMENT` and separate automated/browser comparisons |
+| Interpretation and synthetic walk-through | Original categories retained; matching conclusive browser categories give `SAME_TASK_OUTCOME`, with times and impediments retained separately. Timing examples added for the 2026-11-07 revision. |
 | Unresolved readiness | Endpoint construction or permission, independent configuration checks, current catalog review, host/environment, private storage and retention, preflight budget if any, explicit live authority |
 
 Owner approval completes the methodological review of this preparation
@@ -191,3 +292,8 @@ packet. Any material amendment needs a dated review and a new prospective
 protocol revision. Approval of this packet does **not** authorize
 construction, operator outreach, live measurement, publication, or reuse of
 issue #33's private data.
+
+The [protocol revision history](VALIDATION-REFERENCE-PROTOCOL.md#revision-history)
+records the adopted changes. The
+[original `TACP-0.3` packet](https://github.com/josephlhall/check_tor/blob/ec80623c2ec737ee2aecfc70eae99ca8e02bf602/VALIDATION-REFERENCE-PACKET.md)
+remains available with its historical approval and rules.

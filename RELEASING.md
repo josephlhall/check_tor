@@ -1,104 +1,101 @@
 # Releasing check_tor
 
-Releases use Semantic Versioning and have both an annotated Git tag and a
-GitHub Release record. The repository source is the distribution; do not attach
-generated packages or archives.
+Release the reviewed `main` commit after both jobs in the **Offline tests**
+workflow pass for that commit. A release consists of an annotated Git tag
+and a GitHub Release. Users receive the repository source, so leave
+generated packages and archives out of the release assets. If a tag is
+intended only as a source checkpoint, record that decision before tagging.
 
 ## Choose the version
 
-Use tags in the form `vX.Y.Z`:
+Use Semantic Versioning and tag the release `vMAJOR.MINOR.PATCH`.
 
-- Increment `X` for incompatible changes to the command, inputs, or output.
-- Increment `Y` for backward-compatible scanner capabilities or other
-  substantial user-facing improvements.
-- Increment `Z` for backward-compatible fixes, documentation, tests, and
+- Increment MAJOR for an incompatible change to the command, inputs, behavior,
+  or output contract.
+- Increment MINOR for a backward-compatible scanner capability or other
+  substantial user-facing improvement.
+- Increment PATCH for backward-compatible fixes, documentation, tests, and
   maintenance.
 
-Review every commit since the latest tag before selecting the version:
+A release can include several accepted changes. Review the full range
+since the last release before choosing the version. Replace `v1.5.0` in
+this example with the previous release tag.
 
 ```zsh
 git fetch origin --tags
 git tag --list --sort=-version:refname
-git log --oneline <previous-tag>..origin/main
-git diff --stat <previous-tag>..origin/main
+previous_tag=v1.5.0
+git log --oneline "$previous_tag"..origin/main
+git diff --stat "$previous_tag"..origin/main
 ```
 
-## Prepare the release commit
+## Prepare and verify the release commit
 
-Start from a clean checkout of `main`, update it with a fast-forward-only pull,
-and make any release-specific documentation changes through the normal review
-process. Stage files by explicit path. Do not use broad staging commands such
-as `git add .` or `git add -A`.
-
-Before committing, inspect both the worktree and the exact staged paths:
+Make any release documentation changes through the normal review process.
+Stage changes by explicit path and inspect the staged diff before committing.
+Keep real target lists and raw results outside the repository. Leave
+`targets.txt`, `scans/`, and `*.private.txt` out of the staged changes.
 
 ```zsh
 git status --short
 git diff --check
+git diff --cached --check
 git diff --cached --name-only
 ```
 
-Do not stage or publish `targets.txt`, anything under `scans/`, or any
-`*.private.txt` file. Real operational target lists should remain outside the
-repository.
-
-Run the complete local validation:
+After confirming the staged paths are safe to inspect, review the changes.
 
 ```zsh
-test -x check_tor.zsh
-zsh -n check_tor.zsh check_tor_core.zsh check_tor_probe.zsh scripts/*.zsh tests/*.zsh
-zsh tests/check_tor_test.zsh
-zsh tests/check_tor_integration_test.zsh
-python3 -m unittest discover -s tests -p 'test_measurement.py'
-python3 -m unittest discover -s tests -p 'test_transport_review.py'
-python3 -m unittest discover -s tests -p 'test_redirects.py'
-python3 -m unittest discover -s tests -p 'test_retry_after.py'
-python3 -m unittest discover -s tests -p 'test_curl_trust.py'
-python3 -m unittest discover -s tests -p 'macos_tls_defaults_test.py'
-git diff --check
+git diff --cached
 ```
 
-After the release changes are merged, update local `main` and confirm that it
-exactly matches `origin/main`:
+Run the [local offline checks](README.md#testing) for the proposed changes.
+Once they are merged, update a clean checkout of `main` and record the commit
+SHA. Confirm that `git status --short` is empty and the SHA check passes
+before continuing. Keep using this `release_commit` in the following steps
+so CI verification and tagging refer to the same revision.
 
 ```zsh
 git switch main
 git pull --ff-only origin main
 git status --short
-test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
+release_commit=$(git rev-parse HEAD)
+test "$release_commit" = "$(git rev-parse origin/main)"
 ```
 
-The release commit must have a successful **Offline tests** workflow run on
-both `ubuntu-latest` and `macos-latest`. Inspect the run associated with the
-exact release commit:
+Find the **Offline tests** run for this commit. Set `run_id` to the ID
+shown by `gh run list`. Check that the `ubuntu-latest` and `macos-latest`
+jobs both succeeded. Wait to publish if either job is missing, pending,
+or unsuccessful.
 
 ```zsh
 gh run list \
   --repo josephlhall/check_tor \
   --workflow "Offline tests" \
   --branch main \
-  --commit "$(git rev-parse HEAD)" \
+  --commit "$release_commit" \
   --limit 5
-gh run view <run-id> --repo josephlhall/check_tor
+run_id=123456789
+gh run view "$run_id" --repo josephlhall/check_tor
 ```
-
-Do not publish while either job is missing, pending, or unsuccessful.
 
 ## Publish
 
-Set the selected version and a short release title, then create an annotated
-tag on the validated release commit:
+Replace the example `version` with the chosen tag. Create an annotated
+tag on `release_commit` and confirm it resolves to that SHA.
 
 ```zsh
-version=vX.Y.Z
-git tag --annotate "$version" --message "check_tor $version"
+version=v1.5.1
+git tag --annotate "$version" --message "check_tor $version" "$release_commit"
 git show --no-patch "$version"
-git push origin "$version"
+test "$(git rev-parse "refs/tags/${version}^{commit}")" = "$release_commit"
 ```
 
-Create the corresponding GitHub Release from that existing tag as a draft:
+Once that check passes, push the tag and create the GitHub Release as a
+draft. `--verify-tag` requires the tag to exist on the remote.
 
 ```zsh
+git push origin "refs/tags/$version"
 gh release create "$version" \
   --repo josephlhall/check_tor \
   --verify-tag \
@@ -108,40 +105,38 @@ gh release create "$version" \
 ```
 
 Review the draft's title and generated notes for completeness and accuracy.
-Edit the draft as needed, then publish it:
+Edit them as needed before publishing. If you saved revised notes in a
+file, pass that file to `gh release edit` with `--notes-file`.
 
 ```zsh
 gh release view "$version" --repo josephlhall/check_tor
-reviewed_notes=/path/to/reviewed-release-notes.md
-gh release edit "$version" \
-  --repo josephlhall/check_tor \
-  --notes-file "$reviewed_notes"
-gh release edit "$version" \
-  --repo josephlhall/check_tor \
-  --draft=false
 ```
 
-Verify both publication records:
+Publish the reviewed draft.
 
 ```zsh
-git ls-remote --tags origin "refs/tags/$version"
-gh release view "$version" --repo josephlhall/check_tor
+gh release edit "$version" --repo josephlhall/check_tor --draft=false
+```
+
+Verify that the remote annotated tag resolves to `release_commit` and the
+GitHub Release reports the expected `tagName` with `isDraft: false`.
+The `^{}` suffix asks Git for the commit referenced by the annotated tag.
+
+```zsh
+remote_commit=$(git ls-remote --exit-code --tags origin "refs/tags/${version}^{}" | cut -f1)
+test "$remote_commit" = "$release_commit"
+gh release view "$version" --repo josephlhall/check_tor --json tagName,isDraft,url
 ```
 
 ## Recover from a failed release
 
-If an annotated tag is wrong but has not been pushed, delete and recreate the
-local tag on the correct commit:
+If a tag points to the wrong commit and is still local, delete it with
+`git tag --delete "$version"` and recreate it on the validated commit.
 
-```zsh
-git tag --delete "$version"
-```
+Keep pushed tags in place during routine recovery. If the tagged code is
+sound, correct release notes or other metadata on the existing GitHub
+Release. If the tagged code needs a fix, review the fix and release it
+as a new patch version.
 
-If the tag was pushed or its GitHub Release was published, do not routinely
-move or replace it. Correct release-note metadata in the existing GitHub
-Release when the tagged code is sound. If the tagged code is wrong, fix the
-problem through the normal review process and publish a new patch version.
-
-If the tag push succeeded but GitHub Release creation failed, keep the tag,
-resolve the publication problem, and rerun `gh release create` for that same
-tag. Do not create a second tag merely because the release-record step failed.
+If the tag push succeeded but GitHub Release creation failed, fix the
+publication problem and rerun `gh release create` for the same tag.

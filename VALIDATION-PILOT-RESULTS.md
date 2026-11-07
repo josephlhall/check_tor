@@ -1,5 +1,17 @@
 # Tor Access Comparison Pilot: Calibration Results
 
+In 12 of 14 cases where `check_tor` returned `PASS`, both browsers finished the
+public task. In one other `PASS` case, Tor Browser reached no meaningful
+content while ordinary Firefox finished the task. All three `CHALLENGE`
+results came from purpose-built HTTP 202 responses, and neither browser
+displayed a challenge.
+
+These are reviewed counts from 26 deliberately selected cases at 14 approved
+endpoints, some visited more than once. The pilot shows how scanner verdicts
+and browser outcomes lined up in these cases. Broader claims about scanner
+accuracy, how common Tor blocking is, or an operator's intent or policy would
+require other evidence.
+
 > **Status:** HUMAN REVIEWED — REPOSITORY BASELINE PARITY VERIFIED
 >
 > **Issue:** [#33](https://github.com/josephlhall/check_tor/issues/33)
@@ -16,23 +28,13 @@
 >
 > **Scanner baseline:** `c11c0211dc5b6e98a78cdcc38ed95d2ce5e562a6`
 
-This note reports reviewed aggregate evidence from a bounded comparison of
-`check_tor`, Tor Browser, and an ordinary browser. It does not publish private
-rows, scanner JSONL, targets, screenshots, session data, observed IP addresses,
-or private storage paths.
-
-The results calibrate what the scanner's verdicts meant in these deliberately
-selected cases. They are not an accuracy score, a prevalence estimate, or a
-claim about any operator's intent or policy.
-
 ## Study design
 
 The pilot completed 26 low-volume cases under the frozen
-[Tor Access Comparison Protocol](VALIDATION-PROTOCOL.md). The sample was
-deliberately stratified to exercise scanner verdicts that a random sample might
-rarely produce. It contained 14 unique approved catalog entries: four appeared
-once, eight appeared twice, and two appeared three times. Repeated cases are
-therefore not independent sites.
+[Tor Access Comparison Protocol](VALIDATION-PROTOCOL.md). The design favored
+cases that could exercise verdicts a random sample might rarely produce. Of
+the 14 approved catalog entries, four appeared once, eight appeared twice, and
+two appeared three times.
 
 Each case paired the scanner with a human observation in Tor Browser and a
 fresh private window in ordinary Firefox. Thirteen cases used scanner-first
@@ -51,7 +53,7 @@ The primary browser rubric was:
 
 ## Verdict and access matrices
 
-These are raw counts within the selected pilot strata.
+The first table shows the browser outcomes for each observed scanner verdict.
 
 | Scanner observation | Tor `NORMAL` | Tor `BLOCKED` | Tor `INCONCLUSIVE` | Ordinary `NORMAL` | Ordinary `BLOCKED` | Ordinary `INCONCLUSIVE` |
 |---|---:|---:|---:|---:|---:|---:|
@@ -72,7 +74,7 @@ The two browsers produced the following paired outcomes:
 | `BLOCKED` | `NORMAL` | 1 |
 | `INCONCLUSIVE` | `INCONCLUSIVE` | 4 |
 
-Agreement was classified against Tor Browser's practical outcome:
+The agreement table compares the scanner verdict with the Tor Browser task outcome.
 
 | Agreement category | Cases |
 |---|---:|
@@ -82,9 +84,15 @@ Agreement was classified against Tor Browser's practical outcome:
 | `SCANNER_PESSIMISTIC` | 0 |
 | `INCONCLUSIVE` | 5 |
 
-These counts must not be converted into a general scanner “accuracy” rate. The
-case selection intentionally overrepresented controlled failure conditions,
-and several catalog entries were repeated.
+Four cases were inconclusive in both browsers. In a fifth case, both browsers
+were classified `BLOCKED`, but the scanner's Tor preflight failed before
+contacting the endpoint. That case had no scanner verdict to compare, so it
+also counted as inconclusive for agreement.
+
+The study deliberately overrepresented controlled failure cases. Repeat visits
+to the same endpoint are related observations, so they cannot count as
+independent sites. These counts describe agreement within the pilot and cannot
+support a general scanner accuracy rate.
 
 ## Interpretation by verdict
 
@@ -96,23 +104,19 @@ not performed. In the remaining case, ordinary Firefox completed the task but
 Tor Browser reached no meaningful content; this is the pilot's one
 `SCANNER_OPTIMISTIC` result.
 
-That disagreement shows why `PASS` cannot guarantee Tor Browser access. A
-client-dependent explanation leads the private interpretation, while different
-Tor exits remain a competing explanation. The pilot did not use a fixed shared
-exit or an authorized diagnostic request, so it does not establish either
-mechanism.
+The reviewer considered a difference between the clients the leading
+hypothesis. Different Tor exits were also plausible. The pilot used neither a
+fixed shared exit nor a diagnostic request, so it could not isolate the cause
+of the disagreement.
 
 ### `CHALLENGE`
 
-All three `CHALLENGE` observations came from a purpose-built HTTP success
-response that the scanner classifies as challenge-like. Both browsers displayed
-a stable empty page without a visible status, challenge, or meaningful content,
-so every comparison remained `INCONCLUSIVE` under the visual rubric.
-
-This result identifies a measurement-boundary problem, not observed challenge
-friction: an automated HTTP client can classify response semantics that the
-frozen browser task cannot see. The pilot therefore does not answer how often a
-user-visible challenge is passable in Tor Browser.
+The scanner classified the purpose-built HTTP 202 response as challenge-like.
+Both browsers showed a stable, empty page with no visible status, challenge,
+or meaningful content. The browser task relied on visible evidence, so all
+three comparisons were `INCONCLUSIVE`. These cases show how an HTTP response
+can trigger the scanner label without showing a person a challenge. They leave
+open how often a Tor Browser user can get through a visible challenge.
 
 ### `FAIL`, `RATELIMIT`, and `CERT`
 
@@ -159,20 +163,14 @@ remaining outcomes were three inconclusive cases in scanner-first order and one
 optimistic plus two inconclusive cases in Tor-Browser-first order. The sample is
 too small, stratified, and repeated to estimate an order effect.
 
-## What the pilot supports
+## Implications for the scanner
 
-- `PASS` was usually accompanied by normal Tor Browser access in this sample,
-  but it did not guarantee browser task completion.
-- Controlled `FAIL`, `RATELIMIT`, and `CERT` conditions aligned with practical
-  blockage in both browsers in every observed case.
-- `CHALLENGE` can describe scanner-visible HTTP semantics without implying that
-  a human saw an interactive challenge.
-- Agreement on blockage does not establish why the blockage occurred.
-- The scanner and browser instruments answer related but non-equivalent
-  questions; the existing README distinction remains necessary.
-
-The pilot did not reveal a deterministic classifier defect and does not support
-changing scanner code merely to fit this small sample.
+The scanner verdict describes an automated response. The browser outcome
+describes whether a person could complete the public task. Even when both
+instruments indicate blockage, as in the controlled failure cases, the reason
+for the blockage can differ. Keep that distinction when describing verdicts
+in the README. The pilot did not reveal a deterministic classifier defect and
+does not support changing scanner code to fit this small sample.
 
 ## Limits and follow-up
 

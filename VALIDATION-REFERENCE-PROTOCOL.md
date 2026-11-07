@@ -1,28 +1,32 @@
 # Prospective Tor Access Reference Protocol
 
-> **Protocol ID:** `TACP-0.3`
+`TACP-0.4` defines how a future study would compare what the scanner observes
+with what a person can do in Tor Browser and in an ordinary browser. The
+scanner starts at one approved URL. In each browser, a person starts at that
+same URL and tries to complete the approved public task. Keeping the results
+separate lets the reviewer see where the scanner verdict and browser outcomes
+agree or diverge.
+
+> **Protocol ID:** `TACP-0.4`
 >
 > **Status:** APPROVED FOR PREPARATION — no live authority
 >
 > **Basis:** [Issue #39](https://github.com/josephlhall/check_tor/issues/39)
 > and the completed [pilot](VALIDATION-PILOT-RESULTS.md)
 >
-> **Owner approval:** Communicated 2026-09-25 UTC for the prospective protocol
-> and its linked preparation packet; live environment and data handling remain
-> future readiness decisions
+> **Owner approval:** Original preparation approved 2026-09-25 UTC; revision
+> `TACP-0.4` approved 2026-11-07 for early advancement, deadline recording,
+> delay measurement, and comparison by browser outcome category. Live
+> environment and data handling remain future readiness decisions.
 
-This prospective protocol specifies how a later, separately authorized study
-could compare scanner observations with task-based browser access at reference
-conditions. It does not revise observations collected under
-[`TACP-0.2`](VALIDATION-PROTOCOL.md), which remains the frozen authority for
-issue #33. The [reference preparation packet](VALIDATION-REFERENCE-PACKET.md)
-specifies candidate conditions, a bounded manifest template, and the decisions
-still needed. Neither document authorizes endpoint construction, preflight
-requests, live scanning, browser visits, or operator contact.
-
-The [stewardship policy](ETHICS-AND-DATA-STEWARDSHIP.md) governs every later
-study and can halt a case. A future manifest must resolve its operational
-requirements and receive explicit live authority before any requests.
+The owner approved the method for preparation. A future manifest must satisfy
+the [stewardship policy](ETHICS-AND-DATA-STEWARDSHIP.md) and receive explicit
+authority before any live requests. Endpoint construction and operator contact
+also require separate approval. The
+[reference preparation packet](VALIDATION-REFERENCE-PACKET.md) specifies the
+candidate conditions, traffic limits, and decisions still needed. The
+[completed issue #33 pilot](VALIDATION-PILOT-RESULTS.md) remains governed by
+[`TACP-0.2`](VALIDATION-PROTOCOL.md).
 
 ## Question and limits
 
@@ -64,13 +68,18 @@ manifest; absent that evidence, the header remains unobserved.
 
 ## Freeze the case before observation
 
-Each eligible case needs a catalog record with an independent expectation
-basis, authorization and publication review, a single start URL, an exact
-public task and approved first-party navigation or `not applicable`, and the
-lower of its own and the global traffic limit. Freeze the scanner commit and
+Before choosing a case, document what the endpoint is intended to do, using
+evidence such as the operator's documentation or a reviewed configuration.
+This gives the reviewer an expectation independent of the scanner verdict
+being tested.
+
+The case's catalog record must include that evidence, the authorization and
+publication review, one start URL, the exact public task, and the approved
+first-party navigation or `not applicable`. Use the lower of the case and
+global traffic limits. In the future manifest, freeze the scanner commit and
 settings, browser versions and security level, environment, order, case IDs,
-repeat schedule, and stop rules in a later manifest. Do not select cases by a
-scanner result or replace an unavailable condition after seeing outcomes.
+repeat schedule, and stop rules. Do not select cases by a scanner result or
+replace an unavailable condition after seeing outcomes.
 
 Use a fresh Tor Browser identity and a fresh private ordinary-browser window
 for each case. No diagnostic ordinary browser over Tor, selected exit, circuit
@@ -81,34 +90,59 @@ challenge workaround is part of this protocol.
 
 All times are elapsed seconds from an immediately recorded action start on
 the observation host; use UTC timestamps for starts and ends. The owner
-accepted the numerical limits below on 2026-09-25 as operational study rules,
-not established user-experience thresholds. They bound exposure and make
-`FRICTION` reproducible within a 15-minute paired window. Any later change
-requires a reviewed protocol revision before collection, never after a case
-outcome is seen.
+accepted the numerical limits on 2026-09-25 and the operational rules below on
+2026-11-07. These are study rules, not established user-experience thresholds.
+They bound exposure and make observations reproducible within a 15-minute
+paired window. Changes require a reviewed prospective revision before
+collection, never after a case outcome is seen.
 
-1. Directly load the approved URL. At **30 seconds**, classify a stable result
-   or invoke the one allowed reload only if the page is still loading, stalled,
-   or shows a clearly transient incomplete-load error. A stable refusal,
-   warning, interaction boundary, or completed task is not a reload trigger.
-2. After a permitted reload, wait at most **30 further seconds**. Record its
-   trigger and result. Do not reload a second time, change identity or URL, or
+1. Directly load the approved URL. As soon as the task-relevant content,
+   refusal, warning, or boundary has remained visible and unchanged for
+   **3 seconds**, record that stable result and advance to the next permitted
+   step. Do not wait until 30 seconds when stability is already established.
+   A prohibited interaction stops the entire case immediately under the
+   stewardship policy; do not wait three seconds at that boundary.
+2. The initial load has a hard limit of **30 seconds**. At the limit, record
+   what is visible and that the wait limit was reached. Invoke the one allowed
+   reload only if the page is still loading, stalled, or shows a clearly
+   transient incomplete-load error. A stable refusal, warning, interaction
+   boundary, or completed task is not a reload trigger.
+3. After a permitted reload, allow at most **30 further seconds** from that
+   action's start, advancing earlier if the result is stable. Record the
+   reload trigger and result. Do not reload again, change identity or URL, or
    adjust browser settings.
-3. If the task requires one approved first-party navigation, start it only
-   after meaningful starting content appears. Allow at most **30 seconds** for
-   the destination. Do not substitute another link if it is missing or fails.
-4. A result is stable when the task-relevant content, refusal, warning, or
-   boundary is visible and unchanged for **3 seconds**, or when its wait limit
-   expires. Record time to first meaningful content and time to stable task
-   outcome separately. A visible interstitial or delay of **10 seconds or
-   more** in either required step is a study-defined user-visible impediment;
-   record the actual seconds and what was visible. The threshold alone does not
-   establish why the delay occurred.
-5. Start the paired **15-minute** clock with the first primary instrument.
-   At the limit, do not begin another instrument or add attempts to rescue
+4. If the task requires one approved first-party navigation, start it after
+   meaningful starting content has met the three-second stability rule. Allow
+   at most **30 seconds** from the navigation action, advancing earlier if its
+   result is stable. Do not substitute another link if it is missing or fails.
+5. A deadline ends the action's observation window; it does **not** establish
+   that the page is stable. Do not extend a window to finish the stability
+   check. If content first appears at second 29, record that appearance and
+   stop at second 30, without claiming three seconds of stability. Record the
+   affected action and deadline expiry in the structured note, with null and a
+   reason for that action's unobserved stable time. A permitted reload may
+   subsequently reach stability; retain that later observation. The browser-level
+   `time_to_stable_outcome_seconds` is null only when no stable final task
+   outcome was observed. Apply the rubric to the evidence actually observed;
+   expiry alone does not prove a block or technical failure.
+6. Record time to first meaningful content separately from time to stable
+   outcome. For the **10-second delay threshold**, use the time to the
+   task-relevant content appearing on the initial load or reload, or to the
+   approved navigation completing, measured from that action's start. Exclude
+   the additional three-second stability confirmation. Content appearing at
+   second 7 and confirmed stable at second 10 does not count as a ten-second
+   delay. A visible interstitial, a permitted reload, or a delay of **10 seconds
+   or more** in a required step still makes successful task completion
+   `FRICTION`. Record the actual times and impediments; the threshold does not
+   establish their cause.
+7. Start the paired **15-minute** clock with the first primary instrument.
+   At that limit, do not begin another instrument or add attempts to rescue
    comparability. Close the case with the observations already made and mark
-   the comparison `INCONCLUSIVE` if any required instrument is missing. Record
-   the timing deviation if a safely finishing action extends past the window.
+   the overall case comparison `INCONCLUSIVE` if any required instrument is
+   missing. Preserve the independent browser outcomes; their comparison follows
+   the separate category rules below. Record
+   the timing deviation if a safely finishing action extends past the window;
+   this does not extend a browser action's 30-second limit.
 
 Meaningful content is the predeclared information or function needed for that
 case, not a generic browser error, challenge interstitial, empty response, or
@@ -130,22 +164,24 @@ Apply the same rubric independently to Tor Browser and the ordinary browser:
 | `BLOCKED` | No meaningful task content can be reached within the permitted actions, including when an unperformed prohibited interaction is the boundary. |
 | `INCONCLUSIVE` | Missing observation, ambiguous content, unrelated origin or environment failure, protocol deviation, or instability prevents a fair task classification. |
 
-Record `interaction_boundary` separately as `NONE`, `PASSIVE`,
-`PROHIBITED`, or `UNKNOWN`, with a minimal factual type. A passive challenge
-may finish automatically; record whether it did. A CAPTCHA, human-verification
-action, login, consent disclosure, or access-control workaround is
-`PROHIBITED`: stop that browser task without interacting. A resulting `BLOCKED`
-means blocked **under this task and permitted-action rule**. It is not evidence
-that the interaction would fail, that the site technically failed, or that its
-operator intended to exclude Tor users. Record a distinct
-`technical_failure_observed` value of `true`, `false`, or null and its evidence;
-do not infer it from `BLOCKED`.
+Record `interaction_boundary` separately as `NONE`, `PASSIVE`, `PROHIBITED`,
+or `UNKNOWN`, with a brief description of what appeared. If a passive challenge
+appears, record whether it completes automatically. If you encounter a CAPTCHA,
+human-verification action, login, consent disclosure, or access-control
+workaround, record `PROHIBITED` and stop the entire case under the stewardship
+policy. Leave the interaction untouched. Record the boundary and any completed
+observations, and run no remaining instruments.
 
-The stewardship policy requires stopping the **case** at a prohibited
-interaction boundary. Record the boundary and any completed instrument facts,
-then run no remaining instruments. If the case is incomplete, its paired
-comparison is `INCONCLUSIVE` even when the observed browser task can be
-classified `BLOCKED` under the permitted-action rule.
+If a required instrument is missing, mark the overall case comparison
+`INCONCLUSIVE` even if the observed browser task qualifies as `BLOCKED`.
+A missing browser also makes the browser-to-browser comparison `UNDETERMINED`;
+a missing scanner alone does not erase two completed browser observations.
+That browser outcome describes what was possible under the task's permitted
+actions. It leaves open whether completing the interaction would succeed,
+whether the site technically failed, and whether the operator intended to
+exclude Tor users.
+Record a distinct `technical_failure_observed` value of `true`, `false`, or
+null and the evidence for it.
 
 ## Order, recording, and interpretation
 
@@ -170,6 +206,21 @@ isolates them. Repeat visits to one endpoint are related observations, not
 independent sites or a prevalence denominator. The packet provides the
 recording and synthetic analysis examples.
 
+Compare the browsers by their independently recorded outcome categories.
+When either observation is missing or `INCONCLUSIVE`, use `UNDETERMINED` for
+the browser comparison. Otherwise, matching categories mean
+`SAME_TASK_OUTCOME`, including when both browsers are `FRICTION`. For different
+categories, use the order `NORMAL`, `FRICTION`, `SEVERELY_DEGRADED`, `BLOCKED`
+from less to more impaired to identify the worse browser outcome.
+
+Keep the measured times and specific impediments even when the categories
+match. For example, a required step with a 25-second delay in Tor Browser and a
+12-second delay in the ordinary browser makes both successfully completed
+tasks `FRICTION`. Those delays exclude stability confirmation; they are not
+total task durations summed across steps. The outcome categories match. This does not mean they were equally fast or easy. Do not
+rank a delay, challenge, or reload within a category without a separately
+approved comparison rule defined before collection.
+
 For this prospective study, use `SEMANTIC_DISAGREEMENT` when a scanner label
 correctly reflects a documented HTTP status but implies a challenge or
 barrier that the completed browser task did not encounter. This is an analysis
@@ -187,4 +238,18 @@ Unexpected content, permissions, protocol, or storage uncertainty stops the
 affected case pending human review. A changed timing, endpoint, task,
 instrument, field, or interpretation rule requires a new prospective revision
 and review before use. The completed `TACP-0.2` pilot and its results are never
-recoded under `TACP-0.3`.
+recoded under a later protocol revision.
+
+
+## Revision history
+
+| Revision | Approval | Scope |
+|---|---|---|
+| [`TACP-0.3`](https://github.com/josephlhall/check_tor/blob/ec80623c2ec737ee2aecfc70eae99ca8e02bf602/VALIDATION-REFERENCE-PROTOCOL.md) | 2026-09-25 UTC | Original reference preparation: timing limits, browser rubric, evidence boundaries, and interpretation rules. |
+| `TACP-0.4` | 2026-11-07 | Advance after observed stability; keep hard per-action limits and record expiry separately; exclude stability confirmation from the delay threshold; compare browsers by outcome category while retaining times and impediments. |
+
+The linked `TACP-0.3` text preserves the earlier approved method. This revision
+changes only future observations. The completed `TACP-0.1` dry run and
+`TACP-0.2` pilot retain their original methods and results. Scanner behavior,
+JSONL v1, case allocation, traffic ceilings, and separate live-authorization
+requirements are unchanged.

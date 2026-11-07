@@ -1,5 +1,15 @@
 # Tor Access Comparison Pilot Manifest
 
+The issue #33 pilot attempted 24 primary cases and then used two preassigned
+reserves because only one included primary case returned `FAIL`. The second
+reserve reached the required minimum of two `FAIL` cases, and collection
+stopped at 26 attempts.
+
+This manifest records the plan, environment, and approvals used to run the
+pilot under the [frozen per-case protocol](VALIDATION-PROTOCOL.md). The
+[results](VALIDATION-PILOT-RESULTS.md) report what the scanner and browsers
+observed in these deliberately selected cases.
+
 > **Status:** PILOT COMPLETE — PUBLIC NOTE REVIEWED; BASELINE PARITY VERIFIED
 >
 > **Issue:** [#33](https://github.com/josephlhall/check_tor/issues/33)
@@ -20,13 +30,6 @@
 >
 > **Public note:** [VALIDATION-PILOT-RESULTS.md](VALIDATION-PILOT-RESULTS.md)
 
-This manifest supplies the experiment-level decisions that the frozen
-[Tor Access Comparison Protocol](VALIDATION-PROTOCOL.md) deliberately leaves
-open. It governs a bounded, deliberately selected pilot. It does not estimate
-Internet-wide Tor blocking prevalence, authorize unlisted endpoints, or permit
-live collection before the human reviewer accepts this manifest and separately
-passes the live-readiness checkpoint.
-
 ## Research question and stopping rule
 
 The pilot asks how `check_tor` verdicts correspond to the practical access a
@@ -43,21 +46,20 @@ six reserve cases may be run, in their listed order, only when:
 - after the primary queue, fewer than two included cases have an observed
   `CHALLENGE` verdict or fewer than two have an observed `FAIL` verdict.
 
-Collection stops after the 24 primary cases when neither reserve condition
+Collection stops after the 24 primary cases when none of the reserve triggers
 applies. It always stops at 30 attempted case slots. A stopped, excluded, or
 inconclusive case remains visible and is not silently replaced. Any reserve use
 and its frozen trigger are recorded before the reserve case begins.
 
-The contemporaneous scanner result defines the observed stratum. Expected
-behavior supports design only and is never used to recode an observation.
-Candidate screening is not permitted. If a target stratum cannot be filled
-from this preapproved queue, the shortfall is a pilot limitation rather than a
-reason to probe for more endpoints.
+The expected verdict helped select cases. Only the observed verdict counts
+toward the allocation. If the preapproved queue falls short of a minimum,
+report the shortfall. Do not screen candidates or probe additional endpoints
+to meet it.
 
 ### Target allocation
 
-The target allocation is intentionally directional because the observed
-verdict is unknown until the case runs:
+The allocation below shows which verdicts the design sought to exercise. The
+actual verdict becomes known when the case runs.
 
 | Observed scanner stratum | Target | Design basis |
 |---|---:|---|
@@ -69,9 +71,8 @@ verdict is unknown until the case runs:
 | `TIMEOUT` | Record if naturally observed | No governed public endpoint is approved to induce a long, potentially burdensome timeout |
 | `CERT`, `SOCKS`, `WARN`, or other | Up to 4 planned plus naturally observed cases | Certificate cases preserve boundary coverage; other outcomes remain visible |
 
-Failure to observe `DROP` or `TIMEOUT` does not activate reserve cases. Their
-safe absence answers whether the current governed catalog can support those
-strata and must be reported plainly.
+Report whether the approved cases produced `DROP` or `TIMEOUT`. A missing
+`DROP` or `TIMEOUT` result does not trigger reserves.
 
 ## Host and remote observation
 
@@ -101,9 +102,9 @@ live-readiness conditions are rechecked.
 
 ## Frozen environment choice
 
-The pilot evaluates the current default scanner behavior through explicit
-settings. The values below were read on the Mac mini on 2026-09-07 and must be
-reverified at Checkpoint B before any live authority is granted.
+The pilot used explicit settings that matched the scanner defaults at the
+recorded commit. The reviewer read these values on the Mac mini on 2026-09-07
+and reverified the environment at Checkpoint B before granting live authority.
 
 | Field | Frozen choice or current value |
 |---|---|
@@ -307,9 +308,10 @@ Before closing a case:
 
 ## Batch and pause rules
 
-Each batch contains six planned cases and may be split across days. Stop only
-between fully normalized cases unless a halt condition requires an immediate
-stop. At each batch gate, the human reviewer checks:
+Each batch contains six planned cases and may be split across days. Pause after
+the current case's structured row has passed audit and its transient files
+have been deleted, unless a halt condition requires an immediate stop. At each
+batch review, the human reviewer checks the following.
 
 - case approval, actual order, and the 15-minute paired window;
 - exact primary-instrument timestamps or an explicit deviation;
@@ -327,8 +329,8 @@ order, and the next case files before starting the next case.
 
 ## Live-readiness gate
 
-Checkpoint B must pass every item below before the human separately grants live
-authority:
+Before granting live authority, the human reviewer verifies the following
+at Checkpoint B.
 
 - the manifest status and approval record are current;
 - scanner commit, clean scanner files, explicit settings, and JSONL schema are
@@ -344,12 +346,12 @@ authority:
   remain approved; the `HTTPBIN-STATUS-202` documentation check passed on
   2026-09-07;
 - batch-one case records and one-case raw-file paths are prepared outside Git;
-- screenshots, free-form raw notes, and I5 remain disabled;
-- the contact mailbox and incident path are available; and
-- the human reviewer states explicit authority for live issue #33 collection.
+- screenshots, free-form raw notes, and I5 remain disabled; and
+- the contact mailbox and incident path are available.
 
-Approval of this manifest advances only to live-readiness review. It does not
-by itself authorize a request to any endpoint.
+The reviewer must then explicitly authorize live issue #33 collection before
+any endpoint request. Approval of the manifest alone advances the pilot to
+live-readiness review.
 
 ## Analysis and publication gate
 

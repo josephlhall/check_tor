@@ -1,39 +1,53 @@
 # Detailed measurement output
 
-`--format jsonl-v2` records individual automated requests and the lifecycle of
-one scanner execution. It requires Python 3.9 or newer in addition to the
-scanner's existing Zsh/curl dependencies; it uses only Python's standard
-library. The coordinator invokes the existing Zsh probe and classifier. Text
-output and `--format jsonl` retain their existing contracts and do not require
-Python.
+Use `--format jsonl-v2` when you need a record of each request, control over
+the order and timing of Tor and direct comparisons, or evidence about where
+a run stopped. Detailed mode uses the same Zsh probe and classifier as
+the ordinary scanner and adds a Python coordinator to schedule requests and
+write JSON Lines. It requires Python 3.9 or newer and uses only the standard
+library. Text and JSONL v1 work with Zsh and curl without Python.
+
+Use the [first-scan instructions](README.md#run-your-first-scan) to start
+Tor and check curl's certificate trust before running these examples. Keep
+target files and output outside the repository with restrictive permissions.
+Use endpoints appropriate for the collection you have authorized.
 
 ## Choosing a measurement policy
 
-To keep today's failure-driven retries and conditional target control while
-retaining each observation:
+To record each observation while keeping the default failure-driven retries
+and conditional comparison for the target, select the output format alone.
 
 ```zsh
 ./check_tor.zsh --format jsonl-v2 /path/outside/repo/targets.txt
 ```
 
-To perform three sequential Tor/direct pairs for every input occurrence:
+For three Tor/direct pairs per input occurrence, specify fixed trials and
+a control for each trial. This example alternates which route goes first,
+uses equal request timeouts, and can overlap work on two distinct hostnames.
+
+These scheduling options bypass ambient proxies for direct probes. Qualify
+curl on that direct path with the same executable and CA settings; a check
+through an environment proxy does not cover it. Use a subshell to remove the
+proxy overrides just for the checker and this run:
 
 ```zsh
-./check_tor.zsh --format jsonl-v2 --trials 3 \
-  --control always --control-scope trial \
-  --order counterbalanced --seed 42 \
-  --timeout-first 30 --timeout-retry 30 --timeout-clearnet 30 \
-  --max-partner-gap 60 --workers 2 --start-gap 1 \
-  /path/outside/repo/targets.txt
+(
+  unset http_proxy https_proxy all_proxy no_proxy
+  unset HTTP_PROXY HTTPS_PROXY ALL_PROXY NO_PROXY
+  ./scripts/check-curl-trust.zsh &&
+    ./check_tor.zsh --format jsonl-v2 --trials 3 \
+      --control always --control-scope trial \
+      --order counterbalanced --seed 42 \
+      --timeout-first 30 --timeout-retry 30 --timeout-clearnet 30 \
+      --max-partner-gap 60 --workers 2 --start-gap 1 \
+      /path/outside/repo/targets.txt
+)
 ```
-
-These are invocation examples, not authorization to contact any particular
-site. Keep output outside the repository with restrictive permissions.
 
 | Setting | Meaning |
 | --- | --- |
-| No `--trials` | Retry the existing block-like outcomes, stopping on PASS/CERT/WARN or at `--circuits`. |
-| `--trials N` | Make exactly N Tor observations unless the run fails, is interrupted, or the explicitly selected cautious policy omits work. Successes and CERT/WARN outcomes do not end the sequence. No additional failure retries are added. |
+| Omit `--trials` | Retry block-like verdicts until the result changes to `PASS`, `CERT`, or `WARN`, or the run reaches `--circuits`. |
+| `--trials N` | Schedule 1–100 fixed Tor trials per input occurrence. Each verdict counts as one observation. A failure of the scan, interruption, or the cautious policy can end the sequence early. |
 | `--control conditional` | Make a direct control only when the associated Tor result is block-like. This is the default. |
 | `--max-redirects N` | Follow at most `0`–`100` redirects per Tor/direct target probe; default `10`. Available in every output mode. |
 | `--control always` | Make the control even after a successful Tor result. |
@@ -43,17 +57,21 @@ site. Keep output outside the repository with restrictive permissions.
 | `--order tor-first` | Tor precedes its control; this is the default and the only order for conditional controls. |
 | `--order direct-first` | With always-controls, run direct first. For target-scoped controls this precedes the whole Tor sequence. |
 | `--order counterbalanced --seed N` | Choose reproducible order independently of outcomes, circuit tags, and worker completion order. Requires always-controls. |
-| `--max-partner-gap S` | Maximum start-to-start time for each-trial partners, in seconds; default 60. Observations exceeding it remain in the output with a late flag. |
+| `--max-partner-gap S` | Mark a pair late if the start times of its two probes are more than S seconds apart. Accepts positive seconds up to 3600, default 60. Requires trial-scoped controls when set explicitly. |
 | `--execution-policy legacy\|paired-cautious` | Default `legacy`. `paired-cautious` prioritizes ready pair partners and stops an input hostname after explicit HTTP 429. |
 | `--workers N` | At most N active target bundles, from 1 to 32; default 1. |
 | `--start-gap S` | Global minimum interval between coordinator probe invocations, in seconds, from 0 to 3600; default 0. |
-| `--run-id TEXT`, `--group-id TEXT` | Optional opaque caller labels. They do not replace the scanner's internal execution identity. |
+| `--run-id TEXT`, `--group-id TEXT` | Optional labels for your analysis. Join records by the scanner's generated execution ID. |
 
-Unsupported or contradictory combinations fail before reading the target file
-or making a request. In particular, fixed trials cannot also specify a retry
-count, conditional controls cannot precede the observation that determines
-whether they are needed, and disabled controls cannot have a trial scope or
-an alternative order. The new policy options require v2 output.
+Fixed trials continue after `PASS`, `CERT`, and `WARN`. Block-like verdicts
+count toward the chosen number of trials and do not add failure retries.
+
+The scanner rejects incompatible options before it reads the target file or
+makes a request. Choose either `--trials` or an explicit `--circuits`.
+Use `--order tor-first` for conditional controls, since their eligibility
+depends on the Tor result. A trial scope requires enabled controls, and
+alternative orders require `--control always`. Scheduling options require
+`--format jsonl-v2`.
 
 Counterbalanced order uses `(seed + target_occurrence - 1 + trial - 1) % 2`:
 zero selects Tor first, one selects direct first. For a target-scoped control,
@@ -66,27 +84,28 @@ The first Tor observation uses `--timeout-first`; later Tor observations use
 part of the intended comparison. The partner-gap setting flags elapsed time;
 it does not interrupt a slow partner or add a replacement observation.
 
-A once-per-target control is associated with the bundle. It is not presented
-as a separate matched observation for each Tor request. Fixed observations
-have no invented overall target verdict: consumers receive the native outcomes
-and counts and can apply a separately defined analysis rule.
+A target bundle contains the requests for one input occurrence. A
+target-scoped control belongs to the whole bundle. Use trial-scoped controls
+to compare individual pairs. Fixed trials report individual outcomes and
+counts. Choose a separate analysis rule if you need a single target verdict.
 
 ## Routing and request configuration
 
-Legacy detailed runs preserve inherited routing behavior. Records distinguish
-the requested route from a guarantee about effective routing. `--reproducible`
-removes proxy environment overrides in child processes and explicitly sets
-proxy bypass rules so direct observations bypass proxies and Tor observations
-use the selected SOCKS endpoint. Explicit trial/control/order, worker, or pacing options enable this
-mode automatically, even when they select a default value. TLS trust settings remain in force. `.curlrc` is disabled
-in both legacy and reproducible modes, as in the existing scanner.
+By default, detailed mode inherits the ordinary scanner's proxy settings
+from the environment. In that case the record identifies the requested route
+and marks its effective routing as unknown. Use `--reproducible` to remove
+proxy environment overrides from child processes. The scanner then directs
+Tor probes through the selected SOCKS endpoint and makes direct probes
+without a proxy. Explicit trial, control, order, execution policy, worker,
+or pacing options enable this behavior even if you specify a default value.
+Both routing modes keep the configured TLS trust and suppress `.curlrc`.
 
-The request still uses curl's TLS/HTTP behavior and the scanner's established
-headers, redirect limit, body cap, and classifier. Detailed mode disables curl URL
-globbing, so braces and ranges in a supplied URL cannot expand one observation
-into several transfers. SOCKS isolation credentials
-request circuit isolation; they do not prove a different exit relay. Repeated
-trials are not independent samples. Neither mode reproduces a browser session.
+Detailed mode uses curl's TLS and HTTP behavior, the scanner's fixed headers
+and body cap, and the selected redirect limit. It disables curl URL globbing
+so braces and ranges in one input stay part of a single URL. SOCKS usernames
+request circuit isolation, but different circuits can share an exit. Treat
+the measurements as repeated curl observations. A browser may get a
+different response or do more with the same response.
 
 ## Records and identity
 
@@ -97,8 +116,8 @@ has its own target and bundle identity. Duplicate URLs remain distinct work.
 The original input field contains the retained, trimmed line, before HTTPS
 normalization; blank lines and comments do not create targets.
 
-Caller labels are limited to 1024 characters each and retained target URLs to
-8192 characters. These bounds keep individual records manageable. IDs such as
+The scanner accepts up to 1024 characters for each caller label and up to
+8192 characters for each retained input line before URL normalization. These bounds keep individual records manageable. IDs such as
 `target-1` or `attempt-2` are unique within an execution; use `execution_id`
 together with the local ID when joining files from several executions.
 
@@ -127,9 +146,9 @@ start was never observed; pair completion is a separate fact.
 
 Run records contain allowlisted effective settings, configured bounds, source
 identity, caller labels, actual issued/completed counts, and terminal state.
-A source digest identifies the exact executable-source bytes, including
-comments, even when no release version is available. A comment-only source
-change therefore changes this provenance identifier without changing behavior.
+The scanner hashes the executable source files to identify the version
+that ran, even without a release tag. The digest includes comments, so a
+comment-only edit also changes it.
 Retry-mode counts at the start are bounds rather than a promise that every
 possible request will occur. Preflight and target counts are separate.
 Verdict counts describe observations by route, not independent sites or people.
@@ -160,8 +179,8 @@ changing their types or meanings requires a new schema version. The explicitly
 selected `paired-cautious` policy extends v2 with a new terminal state
 `policy_stopped` and exit code `3`. This expands existing value domains, beyond
 optional-field additions; strict readers must support these before opting in.
-Existing values retain their meanings. Do not parse
-human `detail` strings to recover fields or use them as stable classifications.
+Existing values retain their meanings. Use structured fields for
+classification and reserve human-readable `detail` for display.
 
 UTC timestamps describe civil time and may move if the system clock changes.
 Pacing, durations, and partner gaps use Python's monotonic clock. Monotonic
@@ -170,9 +189,9 @@ values are useful within one execution; they are not cross-machine timestamps.
 ## Redirect observations
 
 `--max-redirects N` counts redirects **followed**, excluding the initial request.
-For A → B → C, zero visits A and leaves B unvisited; one visits A and B and
-leaves C unvisited. A terminal response reached after exactly N redirects is
-not exhaustion. The default remains ten, and preflight follows no redirects
+For A → B → C, a budget of zero visits only A. A budget of one visits A and
+B, leaving C unvisited. A terminal response reached after exactly N
+redirects keeps its normal verdict. The default remains ten, and preflight follows no redirects
 regardless of this setting. `run_start.settings.max_redirects` and
 `settings.request_profile.redirect_limit` both report the effective choice.
 
@@ -202,10 +221,11 @@ URL and checks the reconstructed terminal URL against curl's effective URL.
 References with known curl/Python resolution differences (such as three leading
 slashes, fragment-only references, empty query/fragment delimiters, explicit
 schemes without an authority, or repeated path slashes) are unsupported for
-reconstruction. Unnormalized dot segments are also unsupported. Inconsistent facts, missing headers,
-duplicate/folded Location values, malformed URLs, and unsupported schemes are
-represented explicitly rather than guessed. Missing facts stay null; an empty
-retained hop list does not prove that no redirects occurred.
+reconstruction. The collector also treats unnormalized dot segments as
+unsupported. It records why evidence is incomplete when facts conflict,
+headers are missing, Location values are duplicate or folded, or URLs are
+malformed or use unsupported schemes. Missing facts stay null. Check the
+evidence state before interpreting an empty hop list.
 
 `settings.redirect_evidence_bounds` records finite extraction/retention bounds:
 at most 262144 private header bytes examined, 100 hop records, 8192 UTF-8 bytes
@@ -294,7 +314,7 @@ invocation has a new identity and never revises this result. A later 200 does
 not by itself complete even that new invocation; its requested schedule must
 finish. Combining observations into a study is a caller decision.
 
-A synthetic consumer should accept exit `3` as a policy outcome only with a
+A reader should accept exit `3` as a policy outcome only with a
 valid matching terminal record, keep usable observations, and inspect omissions
 before deciding whether to invoke the scanner again. Require exit `0` plus a
 valid complete terminal record for full successful execution. An absent,
@@ -359,30 +379,30 @@ Header files remain private and are removed with the observation directory.
 
 ## Failure, interruption, and sensitive data
 
-A successful terminal record means the requested schedule completed, regardless
-of native site verdicts. Detailed mode exits 0 on completion, 1 on runtime or
-input-file failure, 2 for invalid command-line arguments, and ordinarily 130
-or 143 for handled SIGINT or SIGTERM respectively. Output failure can prevent
-writing the terminal record even when cancellation was also requested. Interruptions and fatal setup/output failures stop
-new scheduling. Owned child processes are terminated and reaped, complete
-available observations are retained when output remains writable, and terminal
-records identify partial and unexecuted work. The scanner cleans its private
-temporary response files; it does not provide persistent resume or recovery.
+Use the terminal record and exit status together to assess completion. See
+the [outcome table](#cautious-collection-and-completion) for the statuses a
+started run can report. Invalid detailed-mode arguments exit with code `2`
+before the schedule starts.
+
+On interruption or fatal setup or output failure, the scanner stops
+launching new work, terminates its child processes, and cleans its private
+temporary response files. If it can still write output, it keeps available
+observations and reports partial and unexecuted work in the terminal record.
+To collect again, start a new invocation.
 
 A consumer that stops reading stdout for two seconds is treated as an output
 failure; the scanner stops issuing rather than accumulating unbounded output.
 This is an output deadline, not a network timeout. A failed write may leave a
 partial final JSON line, and the scanner does not retain a recovery spool.
 
-An abrupt crash can leave no terminal record or a truncated last line. Treat
-that file as incomplete. Never infer completion from the last successful
-attempt. If stdout has failed, a terminal record may be impossible to write;
-the nonzero process status and missing terminal record remain significant.
+A crash or failed write can leave a truncated line or prevent the scanner
+from writing a terminal record. Treat the run as incomplete in either
+case, even if the last complete attempt succeeded. Retain the nonzero
+process status alongside any records you can still read.
 
-URLs, caller labels, and result details are still sensitive operational data.
-Do not put credentials in targets or labels. Detailed input rejects URL
-userinfo before requests, and emitted URL diagnostics exclude userinfo.
-The format does not retain bodies, cookies, response headers, environment
-dumps, exit IPs, or circuit identities. Query strings and caller-supplied labels
-are not a safe place to hide secrets. JSON escaping protects record syntax;
-it is not anonymization.
+Treat detailed records as sensitive. The scanner rejects credentials in
+the userinfo part of an input URL and removes userinfo from emitted URL
+diagnostics. The record format excludes raw bodies, cookies, headers,
+environment dumps, exit IPs, and circuit identities. It can still expose
+target URLs, query strings, caller labels, and result details. Keep
+credentials out of targets and labels and store the records privately.

@@ -1,32 +1,34 @@
 # Reference Endpoints for Tor Access Comparison
 
-> **Status:** PILOT COLLECTION COMPLETE — CATALOG REMAINS GOVERNED
->
-> **Live observations:** Five issue #32 dry-run cases and 26 issue #33 pilot
-> cases completed; private rows are not published in this catalog
->
-> **Dry-run selection:** Five documented public test cases approved by the
-> owner on 2026-08-29 and completed under `TACP-0.1`
->
-> **Pilot selection:** 26 cases governed by the separately approved
-> [issue #33 manifest](VALIDATION-PILOT-MANIFEST.md) under `TACP-0.2`
->
-> **Private targets:** Prohibited from this public file
+Use this catalog to describe an endpoint's expected behavior, check the basis
+for using it, and record the limits on a proposed observation. A catalog entry
+supports review; it does not guarantee a current outcome or authorize traffic.
 
-This catalog defines how candidate and reference endpoints are described for
-the manual access-comparison protocol. It is not a target list, a claim about
-current site policy, or permission to measure an endpoint.
+Five public test cases were used in the completed issue #32 dry run. The later
+26-case pilot used its own [approved manifest](VALIDATION-PILOT-MANIFEST.md).
+Their results remain in the [dry-run report](VALIDATION-DRY-RUN.md) and
+[pilot report](VALIDATION-PILOT-RESULTS.md); private rows are not published here.
+The dated records below preserve what was reviewed for those studies.
 
-The [issue #39 reference preparation packet](VALIDATION-REFERENCE-PACKET.md)
-specifies five prospective behavior conditions and their feasibility
-dispositions. Its condition IDs are planning labels, not newly verified
-catalog entries or authority for traffic.
+## Using the catalog
 
-Every live case must also satisfy
-[ETHICS-AND-DATA-STEWARDSHIP.md](ETHICS-AND-DATA-STEWARDSHIP.md) and be approved
-under its governing protocol and a separate live manifest. Catalog
-expectations never override current observation, operator contact, a lower
-interaction limit, or a safety stop.
+1. Describe the endpoint using the [catalog schema](#catalog-schema). Explain
+   what it is intended to do and what supports that expectation, such as
+   operator documentation or a reviewed configuration. Record uncertainties
+   before observing a scanner result.
+2. Review eligibility under the [stewardship policy](ETHICS-AND-DATA-STEWARDSHIP.md).
+   A public URL may still create an unwanted association when named in a study.
+   Keep private values outside this file and respect the policy's prohibition
+   on using private targets.
+3. Select cases through a separately approved study manifest with current
+   verification, exact browser tasks, order, and traffic limits. Follow the
+   [case selection requirements](#case-selection-gate); a prior approval or
+   catalog expectation cannot override an opt-out, lower limit, or safety stop.
+
+The [reference preparation packet](VALIDATION-REFERENCE-PACKET.md) specifies
+five prospective conditions and explains which need construction, permission,
+or further review. Those condition IDs describe planned behavior; they do not
+create verified catalog entries or grant permission to make requests.
 
 ## Why the dimensions are separate
 
@@ -101,8 +103,9 @@ made while selecting them. The sanitized procedural record is in
 | DR-05 | `TLS-SELF-SIGNED-BADSSL` | Navigate directly and record the certificate-warning or refusal boundary | Not applicable; do not bypass the warning |
 
 All five cases used the global interaction budget or the lower entry-specific
-limit. I5 remained disabled. Preflight rechecked documentation, versions,
-association, and opt-out status without making a measurement request.
+limit. The optional ordinary-browser-over-Tor diagnostic instrument (`I5`)
+remained disabled. Preflight rechecked documentation, versions, association,
+and opt-out status without making a measurement request.
 
 ## Public starter entries
 
@@ -245,8 +248,9 @@ provide documented mechanisms, not guaranteed observations.
 
 This is a coverage map, not an approved endpoint list. Each row identifies an
 access or failure mode for which a controlled example could exercise the
-observation record and scanner-to-browser comparison. The five-case dry run
-does not need to cover every row.
+observation record and scanner-to-browser comparison. The completed five-case
+dry run covered only part of this inventory; the remaining rows describe possible
+future coverage.
 
 The map keeps gaps visible without inventing targets or expanding the study to
 find them. A `desired` row means that suitable coverage is wanted but no
@@ -294,8 +298,9 @@ entry and its endpoint belong only in the approved private structured store.
 This public file may report only a sanitized behavior-family description when
 the human reviewer determines that doing so is safe and useful.
 
-Creating new controlled infrastructure is outside issue #32. A desired row may
-remain unfilled rather than expanding scope.
+The completed issue #32 dry run did not build controlled infrastructure. New
+construction needs separate scope and authorization. A desired row may remain
+unfilled rather than expanding a study to obtain it.
 
 ## Case selection gate
 

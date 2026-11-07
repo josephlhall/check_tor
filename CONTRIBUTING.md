@@ -1,12 +1,7 @@
-# Contributing Guidelines
+# Contributing to check_tor
 
-Thank you for your interest in this project. 
+This project is closed to outside contributions and feature requests. You
+can fork and adapt the code under [CC0 1.0 Universal](LICENSE).
 
-Please note that this repository is provided as an open-source utility (CC0 1.0 Universal) for the community, but **it is not actively accepting outside contributions, feature requests, or pull requests.**
-
-This tool is provided "as-is" to assist with testing reachability over the Tor network. 
-
-If you would like to modify the tool for your own use case, please feel free to
-fork the repository. Unsolicited pull requests from outside contributors will
-be closed unmerged; maintainers may continue to use protected pull requests for
-repository maintenance.
+Maintainers use protected pull requests for repository maintenance and close
+unsolicited pull requests without merging them.
