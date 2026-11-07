@@ -1,6 +1,6 @@
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/branding/check-tor-reverse.svg">
-  <img src="assets/branding/check-tor.svg" width="96" height="96" alt="check_tor logo: an onion outline with a checkmark">
+  <img src="assets/branding/check-tor.svg" width="128" height="128" alt="check_tor logo: an onion outline with a checkmark">
 </picture>
 
 # Tor Reachability Scanner

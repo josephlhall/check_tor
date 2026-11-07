@@ -29,7 +29,7 @@ All artwork lives in `assets/branding/`.
 | Black | `#000000` | Monochrome reproduction. |
 
 Use the supplied canvas padding, preserve the proportions, and leave room around
-the shoots. For the README, a left-aligned icon around 96 pixels wide is enough.
+the shoots. For the README, a left-aligned icon around 128 pixels wide is enough.
 Keep the project name as `check_tor` in the document's existing typography.
 
 Prefer the navy version on light backgrounds and the pale mint version on dark
