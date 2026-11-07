@@ -273,13 +273,15 @@ probe_read_status() {
 }
 
 # probe <url> <circuit-tag|""> <timeout>
-# An empty circuit tag means a direct (clearnet) request with no proxy.
+# An empty circuit tag omits the explicit Tor proxy; ambient proxy settings
+# still apply unless the detailed bridge supplies reproducible routing rules.
 # The timeout is in seconds. Results replace the probe_* globals plus $BODY,
 # $HDRS (every redirect hop), and $LASTH (the final hop only); callers must
 # consume or copy them before the next probe.
 probe() {
-    # Detailed reproducible runs supply explicit proxy-bypass rules. Legacy
-    # calls leave this dynamically scoped array unset and retain curl's behavior.
+    # The detailed bridge supplies --globoff and, in reproducible mode, explicit
+    # proxy-bypass rules. Legacy calls leave this dynamically scoped array unset
+    # and retain curl's behavior.
     local -a via=()
     (( ${+CHECK_TOR_PROBE_ARGS} )) && via=("${CHECK_TOR_PROBE_ARGS[@]}")
     # socks5-hostname keeps DNS resolution inside Tor. The tag is a disposable

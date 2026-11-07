@@ -25,6 +25,8 @@ import uuid
 from pathlib import Path
 
 SCHEMA = 2
+# Keep this set aligned with blocky() in check_tor_core.zsh: it governs
+# retry/control scheduling, while the shell owns native verdict classification.
 BLOCKY = {"FAIL", "CHALLENGE", "RATELIMIT", "DROP", "TIMEOUT", "SOCKS"}
 VERDICTS = BLOCKY | {"PASS", "CERT", "WARN"}
 MAX_RESULT_BYTES = 131072
@@ -174,6 +176,8 @@ def load_targets(path):
                 raise Failure("target URLs containing userinfo are unsupported")
             if not host or parsed.scheme != "https" or any(ord(c) < 32 for c in url):
                 raise Failure("invalid target URL")
+            # Identity belongs to the input occurrence, including duplicates.
+            # The normalized hostname is only a scheduling lock, not an ID.
             occurrence = len(targets) + 1
             targets.append(
                 {
@@ -272,6 +276,9 @@ class Bundle:
         return self.args.order
 
     def schedule(self):
+        # Each yield queues one request; advance() sends its completed
+        # observation back before policy can choose the next request. This
+        # serializes a bundle even when other target bundles run concurrently.
         a = self.args
         count = a.trials if a.trials is not None else a.circuits
         target_direct_first = (
@@ -299,6 +306,8 @@ class Bundle:
                     if self.order(trial) != "direct-first":
                         yield ("direct", trial_id, pair_id)
                 elif last and last.get("verdict") in BLOCKY:
+                    # Conditional pairs exist only after the Tor result. Retain
+                    # that observation without revising its emitted pair metadata.
                     pair_id = self.target["bundle_id"] + "-pair-" + str(trial)
                     self.pairs[pair_id] = {"trial_id": trial, "attempts": {"tor": last}}
                     yield ("direct", trial_id, pair_id)
@@ -389,6 +398,8 @@ class Engine:
         settings["counterbalance_algorithm"] = (
             "(seed + target_occurrence - 1 + trial - 1) % 2; 0=tor-first"
         )
+        # Hash exact instrument sources, including comments; even a comment-only
+        # revision gets a distinct recorded identity for later provenance checks.
         digest = hashlib.sha256()
         for filename in (
             "check_tor.zsh",
@@ -666,6 +677,8 @@ class Engine:
                 return None
             if local_error is not None and result["verdict"] is not None:
                 return None
+        # JSON booleans decode to Python bool, a subclass of int. Exact types
+        # keep true/false from masquerading as transport counts or exit codes.
         if type(result["curl_exit"]) is not int and not (
             local_error is not None and result["curl_exit"] is None
         ):
@@ -871,6 +884,9 @@ class Engine:
                 raise Failure("Tor preflight failed")
             waiting = collections.deque(self.targets)
             while not CANCELLED and (waiting or self.bundles or self.active):
+                # Hold the hostname lock for the entire bundle, including gaps
+                # between its Tor/control requests. Paths and ports on the same
+                # normalized hostname must not create overlapping bundles.
                 busy_hosts = {b.target["hostname"] for b in self.bundles}
                 # Scan past blocked duplicates without changing occurrence IDs.
                 for _ in range(len(waiting)):
