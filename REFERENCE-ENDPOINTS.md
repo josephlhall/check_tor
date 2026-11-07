@@ -273,7 +273,7 @@ eligible endpoint has been selected; it does not authorize discovery traffic.
 
 `targets-EXAMPLE.txt` contains well-known public sites that the repository has
 already designated safe as examples. They are not automatically `verified`
-catalog entries for this study. Before one can become an issue #33 pilot case,
+catalog entries for a future study. Before selection for a new case,
 the human reviewer must approve:
 
 - the exact public task and navigation;
@@ -281,7 +281,7 @@ the human reviewer must approve:
 - whether naming the site creates an unwanted association;
 - the current stability and statefulness assessment;
 - the verification date; and
-- its role in the approved pilot allocation or stopping rule.
+- its role in the approved study allocation or stopping rule.
 
 Do not record or publish a presumed verdict, WAF, Tor policy, or human outcome
 for an ordinary public candidate before the contemporaneous protocol

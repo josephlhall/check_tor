@@ -141,7 +141,7 @@ The principal machine fields are:
 | `run_start` | `settings` (including `request_profile`), `scanner`, `clocks`, and `planned`. |
 | Target-related records | `target_id`, `target_occurrence`, `bundle_id`, `original_input`, and `url`. |
 | `attempt_start` / `attempt_end` | `attempt_id`, `phase`, `route`, `global_order`, `bundle_order`, `trial_id`, `pair_id`, `pairing_state`, `routing`, `requested_timeout`, `started_at`, and `adapter_started`. |
-| `attempt_end` | `ended_at`, `duration_seconds`, `status`, `complete`, `verdict`, `detail`, `http_status`, `curl_exit`, `curl_error`, `final_url`, `redirect_count`, `body_limited`, `tor_verified`, and `local_error`. |
+| `attempt_end` | `ended_at`, `duration_seconds`, `status`, `complete`, `verdict`, `detail`, `http_status`, `curl_exit`, `curl_error`, `final_url`, `redirect_count`, `body_limited`, `tor_verified`, and `local_error`; target observations may also include `stop_reason` and `redirect_evidence`. |
 | `pair_end` | `attempt_ids` keyed by route, `observed_start_gap_seconds`, `late`, `state`, `missing_routes`, and `aborted_routes`. |
 | `bundle_end` | `state`, `attempts_issued`, and `attempts_completed`. |
 | `run_end` | `state`, `complete`, `exit_code`, `duration_seconds`, `counts` split into preflight/target issued/completed, `target_states`, `verdict_counts`, and nullable `error`. |
@@ -157,6 +157,10 @@ target observations. A missing verdict-count key means zero occurrences.
 Consumers may ignore additional optional fields within v2. Removing fields or
 changing their types or meanings requires a new schema version. Do not parse
 human `detail` strings to recover fields or use them as stable classifications.
+
+UTC timestamps describe civil time and may move if the system clock changes.
+Pacing, durations, and partner gaps use Python's monotonic clock. Monotonic
+values are useful within one execution; they are not cross-machine timestamps.
 
 ## Redirect observations
 
@@ -174,7 +178,7 @@ Target `attempt_end` records add optional fields within schema v2:
 | `stop_reason` | `redirect_limit` for native curl exit 47, `body_limit` when the inspection cap takes precedence, otherwise null. A stop is inconclusive about subsequent access. |
 | `redirect_evidence.state` | `complete`, `unavailable`, `invalid`, `unsupported`, or `truncated` extraction. This describes evidence quality, not access or scanner completion. |
 | `redirect_evidence.followed` | Ordered records with one-based `hop`, `http_status`, `response_url`, and resolved `destination` for each retained followed redirect. A prefix may be retained when later evidence is unusable. |
-| `redirect_evidence.next_destination` | Resolved, sanitized destination left unvisited at curl's redirect limit, or null. This URL has no observed response status. |
+| `redirect_evidence.next_destination` | Resolved, sanitized destination left unvisited at curl's redirect limit, or null. No response was observed for this next hop; its URL may already have appeared in a cycle. |
 | `redirect_evidence.next_destination_state` | `available`, `absent`, `invalid`, `unsupported`, `truncated`, `unavailable`, or `not_applicable` (no redirect-limit stop). |
 
 Existing `final_url` and `http_status` describe the final **visited** response;
@@ -213,10 +217,6 @@ removed from every exported hop and next destination. Query strings and
 fragments are retained for destination interpretation and may contain sensitive
 values: detailed output remains operational data, not anonymized output. Invalid
 metadata is represented by fixed state labels, never echoed in diagnostics.
-
-UTC timestamps describe civil time and may move if the system clock changes.
-Pacing, durations, and partner gaps use Python's monotonic clock. Monotonic
-values are useful within one execution; they are not cross-machine timestamps.
 
 ## Concurrency and pacing
 
