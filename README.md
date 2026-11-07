@@ -95,8 +95,7 @@ mode additionally requires Python 3.9 or newer (standard library only).
    environment. A passing result covers these controls, not all TLS security.
 
    The [upstream runner-image incident](https://github.com/actions/runner-images/issues/15228)
-   affects macOS system and stale Homebrew trust independently; a Homebrew CA
-   update alone does not repair Apple curl's default trust. Follow
+   affected macOS system and stale Homebrew trust independently. Follow
    [Apple's affected-root guidance](https://support.apple.com/en-us/149555)
    and verify the curl you will actually use. The checker reports failure
    without changing host trust.
@@ -252,26 +251,27 @@ a source checkpoint, record that decision before tagging.
 
 ## Trust-control maintenance
 
-The macOS CI job builds a temporary CA bundle from preinstalled Apple/Homebrew
-PEM stores, requiring Apple’s bundle and valid, complete certificates, and
-excluding the two roots identified by DER SHA-256 in the incident's
-[public root list](https://emudhra.we-have-a-problem.com/roots.json). It exports
-explicit curl, Git, and Python CA paths, selects that OpenSSL store for
-checkout's Node runtime, and requires the positive and four negative controls
-before checkout. A separate pre-checkout control resolves the same PATH Git
-as checkout (including Homebrew Git), requires a successful public GitHub query,
-and requires certificate-specific rejection of all four incident hosts. These
-Git probes use an empty working directory/home, ignore ambient Git configuration,
-credentials and proxies, and prohibit redirects and interactive authentication.
-They test the exported CA settings; they do not establish that macOS native trust
-or other clients have been repaired. The job fails before checkout if either
-client's controls fail. It downloads no replacement trust material. GitHub's
-runner provisioning and action acquisition remain provider boundaries outside these
-steps. Linux and macOS then check the measurement curl after checkout.
+The `macos-latest` CI job builds a temporary CA bundle from preinstalled
+Apple and Homebrew PEM stores. It requires Apple’s bundle and valid, complete
+certificates and excludes the two roots identified by DER SHA-256 in the
+incident's [public root list](https://emudhra.we-have-a-problem.com/roots.json).
+The bundle and empty CA directory are scoped to checkout and its Git guard.
+Checkout's Node runtime selects the filtered OpenSSL store with
+`--use-openssl-ca`.
+
+Before checkout, Apple curl uses runner defaults to reach GitHub and must reject
+all four incident chains. A separate guard resolves the same PATH Git as
+checkout, applies the filtered settings, and requires a successful public
+GitHub query and certificate-specific rejection of all four incident chains.
+The Git guard uses an empty working directory and home, ignores ambient Git
+configuration, credentials and proxies, and prohibits redirects and interactive
+authentication. Either guard can stop the job before checkout. GitHub provisions
+the runner and acquires actions before these steps. After checkout, Linux and
+macOS check the effective measurement curl with runner defaults.
 
 Offline regression checks for the filter and preflight use Python 3, public
-root fixtures, and fake curl responses, without network access. Python 3 is
-needed for these maintenance tests and CI bootstrap, and Python 3.9+ is also
+root fixtures, and fake curl and Git responses. Python 3 is needed for these
+maintenance tests and CI bootstrap, and Python 3.9+ is also
 required for detailed `--format jsonl-v2` scanning. Text and JSONL v1 scanning
 do not require Python. Run these tests with the complete offline validation
 sequence below.
@@ -293,10 +293,25 @@ versions. Every client must reach the positive control and reject all four
 incident chains; acceptance and inconclusive network failures fail the run.
 Results continue to be collected after individual failures.
 
-Keep the ordinary workflow's mitigations until successful default-trust evidence
-for the relevant image and clients supports a separate review of their removal.
-The dedicated workflow's scoped result does not establish that every client or
-GitHub's earlier runner/action acquisition boundary is repaired.
+The November 6, 2026 qualification passed for all eight Apple, PATH, and
+Homebrew clients on the ARM64 `macos-26-arm64` image `20261102.0473.1`
+(macOS 26.7.2, build `25G332`). The ordinary job used the same image revision,
+selected `/usr/bin/curl` and `/opt/homebrew/bin/git`, and found zero affected
+roots in the PEM files it filtered.
+[Default-trust run](https://github.com/josephlhall/check_tor/actions/runs/42311169871/job/128212690512)
+and [ordinary run](https://github.com/josephlhall/check_tor/actions/runs/42323039298/job/128251831777).
+
+The upstream issue closed after the image rollout.
+[November 6 closure comment](https://github.com/actions/runner-images/issues/15228#issuecomment-6691723697).
+
+Retiring the remaining checkout settings requires
+the runner-bundled Node runtime selected by the pinned checkout action and its
+HTTPS transport, plus checkout's PATH Git, to pass a legitimate HTTPS control
+and certificate-specific rejection of all four incident chains with default
+trust on the relevant hosted image and architecture. Record the image and
+client versions and verify ordinary hosted checkout after removing the settings.
+The existing qualification covers curl, Git and Python on ARM64. GitHub's
+runner provisioning and action acquisition need separate provider evidence.
 
 ## Testing
 

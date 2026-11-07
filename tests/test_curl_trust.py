@@ -122,6 +122,7 @@ class GitTrustTests(unittest.TestCase):
             "PATH": str(self.temp) + os.pathsep + os.environ["PATH"],
             "GIT_SSL_CAINFO": str(self.temp / "cert.pem"), "GIT_SSL_CAPATH": str(self.temp / "empty"),
             "SSL_CERT_FILE": str(self.temp / "cert.pem"), "SSL_CERT_DIR": str(self.temp / "empty"),
+            "NODE_OPTIONS": "--use-openssl-ca",
             "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "http.extraHeader", "GIT_CONFIG_VALUE_0": "synthetic",
             "GIT_SSL_NO_VERIFY": "1", "GIT_EXEC_PATH": "synthetic", "HTTPS_PROXY": "synthetic",
             "https_proxy": "synthetic", "ALL_PROXY": "synthetic", "GIT_ASKPASS": "synthetic",
@@ -148,7 +149,7 @@ class GitTrustTests(unittest.TestCase):
             self.assertEqual(Path(env["HOME"]).resolve(), Path(call["cwd"]).resolve())
             self.assertNotEqual(env["HOME"], os.environ["HOME"])
             for key in ("GIT_SSL_NO_VERIFY", "GIT_EXEC_PATH", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0",
-                        "HTTPS_PROXY", "https_proxy", "ALL_PROXY"):
+                        "HTTPS_PROXY", "https_proxy", "ALL_PROXY", "NODE_OPTIONS"):
                 self.assertNotIn(key, env)
             for setting in ("credential.helper=", "http.extraHeader=", "http.proxy=", "http.sslVerify=true",
                             "http.followRedirects=false"):
@@ -211,6 +212,7 @@ class BootstrapTests(unittest.TestCase):
         self.addCleanup(self.directory.cleanup)
         self.temp = Path(self.directory.name)
         self.environment_file = self.temp / "environment"
+        self.output_file = self.temp / "output"
         self.workflow = (ROOT / ".github/workflows/offline-tests.yml").read_text()
         self.source = textwrap.dedent(self.workflow.split("          python3 - <<'PY'\n", 1)[1]
                                      .split("          PY\n", 1)[0])
@@ -222,7 +224,8 @@ class BootstrapTests(unittest.TestCase):
             return content if str(path) in SOURCES else read_text(path, *args, **kwargs)
         def fixture_exists(path):
             return str(path) not in missing if str(path) in SOURCES else is_file(path)
-        with patch.dict(os.environ, {"RUNNER_TEMP": str(self.temp), "GITHUB_ENV": str(self.environment_file)}), \
+        with patch.dict(os.environ, {"RUNNER_TEMP": str(self.temp), "GITHUB_ENV": str(self.environment_file),
+                                     "GITHUB_OUTPUT": str(self.output_file)}), \
              patch.object(Path, "read_text", fixture_read), patch.object(Path, "is_file", fixture_exists), \
              contextlib.redirect_stdout(io.StringIO()):
             exec(compile(self.source, "workflow trust bootstrap", "exec"), {})
@@ -232,52 +235,70 @@ class BootstrapTests(unittest.TestCase):
         self.bootstrap(roots + SAFE_PEM)
         bundle = self.temp / "check-tor-trust/cert.pem"
         self.assertEqual(bundle.read_text(), SAFE_PEM)
-        settings = dict(line.split("=", 1) for line in self.environment_file.read_text().splitlines())
-        self.assertEqual(settings["CURL_CA_BUNDLE"], str(bundle))
-        self.assertEqual(settings["GIT_SSL_CAINFO"], str(bundle))
-        self.assertEqual(settings["SSL_CERT_FILE"], str(bundle))
-        self.assertEqual(list(Path(settings["SSL_CERT_DIR"]).iterdir()), [])
-        self.assertNotIn("NODE_OPTIONS", settings)  # GITHUB_ENV rejects this name.
+        capath = bundle.parent / "empty-ca-directory"
+        name, settings = self.output_file.read_text().strip().split("=", 1)
+        self.assertEqual(name, "checkout_env")
+        self.assertEqual(json.loads(settings), {
+            "SSL_CERT_FILE": str(bundle),
+            "SSL_CERT_DIR": str(capath),
+            "GIT_SSL_CAINFO": str(bundle),
+            "GIT_SSL_CAPATH": str(capath),
+            "NODE_OPTIONS": "--use-openssl-ca",
+        })
+        self.assertEqual(list(capath.iterdir()), [])
+        self.assertFalse(self.environment_file.exists())
 
-    def test_no_remaining_roots_fails_before_export(self):
+    def test_no_remaining_roots_fails_before_output(self):
         with self.assertRaisesRegex(SystemExit, "empty CA bundle"):
             self.bootstrap((ROOT / "tests/fixtures/distrusted-roots.pem").read_text())
-        self.assertFalse(self.environment_file.exists())
+        self.assertFalse(self.output_file.exists())
 
-    def test_malformed_bundle_fails_before_export(self):
+    def test_malformed_bundle_fails_before_output(self):
         with self.assertRaises(SystemExit):
             self.bootstrap("not a certificate")
-        self.assertFalse(self.environment_file.exists())
+        self.assertFalse(self.output_file.exists())
 
-    def test_missing_required_apple_bundle_fails_before_export(self):
+    def test_missing_required_apple_bundle_fails_before_output(self):
         with self.assertRaisesRegex(SystemExit, "Required Apple CA bundle is missing"):
             self.bootstrap(SAFE_PEM, missing=("/etc/ssl/cert.pem",))
-        self.assertFalse(self.environment_file.exists())
+        self.assertFalse(self.output_file.exists())
 
-    def test_incomplete_pem_blocks_fail_before_export(self):
+    def test_incomplete_pem_blocks_fail_before_output(self):
         for fragment in ("-----BEGIN CERTIFICATE-----\nYWJj\n", "-----END CERTIFICATE-----\n"):
             with self.subTest(fragment=fragment):
                 with self.assertRaisesRegex(SystemExit, "Incomplete certificate block"):
                     self.bootstrap(SAFE_PEM + fragment)
-                self.assertFalse(self.environment_file.exists())
+                self.assertFalse(self.output_file.exists())
 
-    def test_invalid_retained_der_fails_before_export(self):
+    def test_invalid_retained_der_fails_before_output(self):
         invalid = ("-----BEGIN CERTIFICATE-----\n"
                    + base64.b64encode(b"not an X.509 certificate").decode()
                    + "\n-----END CERTIFICATE-----\n")
         with self.assertRaises(ssl.SSLError):
             self.bootstrap(SAFE_PEM + invalid)
-        self.assertFalse(self.environment_file.exists())
+        self.assertFalse(self.output_file.exists())
 
     def test_bootstrap_and_negative_controls_precede_checkout(self):
         names = ["Prepare restricted macOS trust", "Verify macOS trust before checkout",
                  "Verify checkout Git trust before checkout", "Check out repository"]
         offsets = [self.workflow.index(name) for name in names]
         self.assertEqual(offsets, sorted(offsets))
-        self.assertIn("NODE_OPTIONS: ${{ runner.os == 'macOS' && '--use-openssl-ca' || '' }}", self.workflow)
         self.assertIn("persist-credentials: false", self.workflow)
         for host in HOSTS:
             self.assertIn(host, self.workflow)
+
+    def test_restricted_settings_apply_only_to_checkout_and_its_git_guard(self):
+        environments = {}
+        for block in self.workflow.split("\n      - name: ")[1:]:
+            name, *lines = block.splitlines()
+            for line in lines:
+                if line.startswith("        env:") and "checkout_env" in line:
+                    environments[name] = line.strip()
+        settings = "env: ${{ fromJSON(runner.os != 'macOS' && '{}' || steps.macos-trust.outputs.checkout_env) }}"
+        self.assertEqual(environments, {
+            "Verify checkout Git trust before checkout": settings,
+            "Check out repository": settings,
+        })
 
 
 if __name__ == "__main__":
