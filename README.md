@@ -250,8 +250,8 @@ roadmap](MEASUREMENT-VALIDATION.md) for methods, limits, and follow-up.
 
 ## Testing
 
-Run the offline checks from the repository root with Zsh, curl, and a
-current Python 3 release. The tests use synthetic targets, temporary files,
+Run the offline checks from the repository root with Zsh, curl, and
+Python 3.9 or newer. The tests use synthetic targets, temporary files,
 and local fixtures. The redirect suite opens loopback connections. You can
 run the suites without Tor or Internet access.
 
@@ -282,47 +282,10 @@ is tracked in [issue #47](https://github.com/josephlhall/check_tor/issues/47).
 
 The [Offline tests workflow](.github/workflows/offline-tests.yml) runs those
 suites on Ubuntu and macOS for pull requests and pushes to `main`, and can run
-on demand. It also makes separate live certificate checks using fixed
-control hosts. Those checks are outside the local offline suite.
-
-### macOS CI certificate checks
-
-The ordinary CI workflow checks trust before checkout so it can stop if
-Apple curl or checkout's PATH Git accepts an affected certificate chain.
-Both guards must reach the positive control and reject all four affected
-chains; an inconclusive connection failure also stops checkout. Apple curl
-uses runner defaults. The Git check and the checkout action use
-a temporary bundle from the preinstalled Apple and Homebrew stores, with
-the two roots in the incident's [public root
-list](https://emudhra.we-have-a-problem.com/roots.json) excluded by certificate
-fingerprint. The action's Node runtime uses that bundle as its OpenSSL
-store. The Git check uses an isolated configuration and disables proxies,
-redirects, and interactive authentication. After checkout, both platforms
-verify the measurement curl with runner defaults.
-
-The separate [macOS default TLS trust
-workflow](.github/workflows/macos-tls-defaults.yml) tests installed Apple,
-PATH, and Homebrew clients with default trust. It runs on demand and for
-pull requests that change that workflow or its own offline test. It reports
-the runner image and client versions and collects results across clients
-even when one fails. Each client must reach a positive control and reject
-all four incident chains with a certificate-specific error.
-
-On November 6, 2026, all eight tested clients passed on ARM64 image
-`macos-26-arm64` version `20261102.0473.1` (macOS 26.7.2, build `25G332`).
-The ordinary run on the same image selected `/usr/bin/curl` and
-`/opt/homebrew/bin/git` and found zero affected roots in the filtered PEM
-files. The upstream issue closed after the image rollout. [Default-trust
-run](https://github.com/josephlhall/check_tor/actions/runs/42311169871/job/128212690512),
-[ordinary run](https://github.com/josephlhall/check_tor/actions/runs/42323039298/job/128251831777),
-[upstream closure](https://github.com/actions/runner-images/issues/15228#issuecomment-6691723697).
-
-Keep the scoped checkout settings until the pinned checkout action's bundled
-Node runtime and HTTPS transport, plus its PATH Git, pass those controls
-with default trust on the relevant hosted image and architecture. Record the
-image and client versions, and verify ordinary hosted checkout after removal.
-The November 6 run covers curl, Git, and Python. GitHub's earlier provisioning
-and action acquisition require separate provider evidence.
+on demand. On macOS, it also runs the Python suites with Apple’s system
+Python. The workflow separately checks the measurement curl’s certificate
+validation using fixed public control hosts; that step requires Internet
+access.
 
 ## Releases and license
 
