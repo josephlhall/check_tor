@@ -93,7 +93,7 @@ classify() {
                 detail="no response in ${probe_timeout}s — silent drop or dead host"
             fi
             return ;;
-        47) verdict=WARN; detail="redirect loop (more than 10 redirects)"; return ;;
+        47) verdict=WARN; detail="redirect follow limit reached (${MAX_REDIRECTS:-10}); subsequent access unobserved"; return ;;
         0)  ;;
         *)  verdict=WARN; detail="curl exit $probe_exit"
             [[ -n "$probe_err" ]] && detail+=" — $probe_err"

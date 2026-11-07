@@ -157,6 +157,7 @@ usage() {
     print -r -- "  --format jsonl-v2         Detailed requests and run records (requires Python 3.9+)."
     print -r -- "  --proxy HOST:PORT         Tor SOCKS proxy (default: localhost:9050)."
     print -r -- "  --circuits COUNT          Maximum Tor attempts, 1–100 (default: 3)."
+    print -r -- "  --max-redirects COUNT     Redirects followed, 0–100 (default: 10); initial request is not counted."
     print -r -- "  --timeout-first SECONDS   First Tor attempt, 1–3600 (default: 60)."
     print -r -- "  --timeout-retry SECONDS   Later Tor attempts, 1–3600 (default: 30)."
     print -r -- "  --timeout-clearnet SECONDS  Clearnet control, 1–3600 (default: 20)."
@@ -175,6 +176,10 @@ usage() {
     print -r -- "  --workers COUNT          Active target bundles, 1–32 (default: 1)."
     print -r -- "  --start-gap SECONDS       Global probe-start interval, 0–3600 (default: 0)."
     print -r -- ""
+    print -r -- "Redirect-limit stops leave subsequent access unobserved; preflight follows no redirects."
+    print -r -- "jsonl-v2 adds bounded hop evidence; see DETAILED-OUTPUT.md for limits and privacy."
+    print -r -- "Text and JSONL v1 retain their output contracts."
+    print -r -- ""
     print -r -- "Environment:"
     print -r -- "  NO_COLOR    Disable ANSI color styling."
     print -r -- ""
@@ -184,17 +189,17 @@ usage() {
 }
 
 parse_bounded_integer() {
-    local value=$1 option_name=$2 maximum=$3
+    local value=$1 option_name=$2 maximum=$3 minimum=${4:-1}
     # Reject long digit strings before arithmetic expansion: shell integers
     # have platform-sized limits, while every public setting has a much
     # smaller bound. 10# then normalizes leading zeroes as decimal, never octal.
     if [[ "$value" != <-> ]] || (( ${#value} > 9 )); then
-        print -u2 -r -- "Error: $option_name requires a positive integer no greater than $maximum."
+        print -u2 -r -- "Error: $option_name requires a decimal integer between $minimum and $maximum."
         return 1
     fi
     value=$(( 10#$value ))
-    if (( value < 1 || value > maximum )); then
-        print -u2 -r -- "Error: $option_name requires a positive integer no greater than $maximum."
+    if (( value < minimum || value > maximum )); then
+        print -u2 -r -- "Error: $option_name requires a decimal integer between $minimum and $maximum."
         return 1
     fi
     REPLY=$value
@@ -291,7 +296,7 @@ probe() {
     probe_local_failure=0
     probe_body_limited_known=0
     probe_exit_known=0
-    probe_exit=1 probe_code=000 probe_redirs="" probe_tls=0 probe_final="" probe_err="" probe_body_limited=0
+    probe_exit=1 probe_code=000 probe_redirs="" probe_tls=0 probe_final="" probe_next="" probe_err="" probe_body_limited=0
     local response_file
     for response_file in "$BODY" "$HDRS" "$LASTH" "$BODY.curl-status" "$BODY.sink-status"; do
         : > "$response_file" || { probe_local_failure=1; return 1; }
@@ -315,7 +320,7 @@ probe() {
         -D "$HDRS" -L --max-redirs "$MAX_REDIRECTS" \
         -A "$USER_AGENT" -H "$ACCEPT_HDR" -H "$LANG_HDR" \
         "${via[@]}" --max-time "$3" \
-        -w '%{http_code}\t%{num_redirects}\t%{time_appconnect}\t%{url_effective}\t%{errormsg}' \
+        -w '%{http_code}\t%{num_redirects}\t%{time_appconnect}\t%{url_effective}\t%{errormsg}\nCHECK_TOR_NEXT_URL\n%{redirect_url}\nCHECK_TOR_NEXT_END' \
         "$1" 2>/dev/null)
     probe_read_status
     local body_bytes
@@ -333,7 +338,16 @@ probe() {
     fi
     # IFS treats tabs as whitespace and collapses empty columns. Preserve them
     # so unavailable TLS/final-URL metadata cannot shift a diagnostic into a URL.
-    local -a probe_fields=("${(@ps:\t:)out}")
+    # A hostile Location may contain tabs even when curl stops at the limit.
+    # Frame its native next URL separately, with a suffix that also prevents
+    # command substitution from stripping any trailing newlines in the value.
+    local metadata=$out next_marker=$'\nCHECK_TOR_NEXT_URL\n'
+    if [[ $out == *$next_marker* && $out == *$'\nCHECK_TOR_NEXT_END' ]]; then
+        metadata=${out%%$next_marker*}
+        probe_next=${out#*$next_marker}
+        probe_next=${probe_next%$'\nCHECK_TOR_NEXT_END'}
+    fi
+    local -a probe_fields=("${(@ps:\t:)metadata}")
     probe_code=${probe_fields[1]:-000}
     probe_redirs=${probe_fields[2]:-}
     probe_tls=${probe_fields[3]:-0}
@@ -357,6 +371,7 @@ probe() {
 parse_args() {
     local output_format=text target_file="" argument
     local proxy=$TOR_PROXY circuits=$MAX_CIRCUITS
+    local max_redirects=$MAX_REDIRECTS
     local timeout_first=$TIMEOUT_FIRST timeout_retry=$TIMEOUT_RETRY
     local timeout_clearnet=$TIMEOUT_CLEARNET clearnet_enabled=$CLEARNET_ENABLED
     REPLY="" reply=()
@@ -377,7 +392,7 @@ parse_args() {
                 output_format=$1
                 ;;
             --format=*) output_format=${argument#*=} ;;
-            --proxy|--circuits|--timeout-first|--timeout-retry|--timeout-clearnet)
+            --proxy|--circuits|--max-redirects|--timeout-first|--timeout-retry|--timeout-clearnet)
                 local option_name=$argument
                 shift
                 if (( $# == 0 )); then
@@ -385,6 +400,10 @@ parse_args() {
                     return 1
                 fi
                 case $option_name in
+                    --max-redirects)
+                        parse_bounded_integer "$1" "$option_name" 100 0 || return 1
+                        max_redirects=$REPLY
+                        ;;
                     --proxy)
                         validate_proxy "$1" || return 1
                         proxy=$REPLY
@@ -407,9 +426,13 @@ parse_args() {
                         ;;
                 esac
                 ;;
-            --proxy=*|--circuits=*|--timeout-first=*|--timeout-retry=*|--timeout-clearnet=*)
+            --proxy=*|--circuits=*|--max-redirects=*|--timeout-first=*|--timeout-retry=*|--timeout-clearnet=*)
                 local option_name=${argument%%=*} option_value=${argument#*=}
                 case $option_name in
+                    --max-redirects)
+                        parse_bounded_integer "$option_value" "$option_name" 100 0 || return 1
+                        max_redirects=$REPLY
+                        ;;
                     --proxy)
                         validate_proxy "$option_value" || return 1
                         proxy=$REPLY
@@ -486,7 +509,7 @@ parse_args() {
 
     REPLY=$target_file
     reply=("$target_file" "$output_format" "$proxy" "$circuits" \
-           "$timeout_first" "$timeout_retry" "$timeout_clearnet" "$clearnet_enabled")
+           "$timeout_first" "$timeout_retry" "$timeout_clearnet" "$clearnet_enabled" "$max_redirects")
 }
 
 load_targets() {
@@ -739,6 +762,7 @@ main() {
     local OUTPUT_FORMAT=${reply[2]} TOR_PROXY=${reply[3]} MAX_CIRCUITS=${reply[4]}
     local TIMEOUT_FIRST=${reply[5]} TIMEOUT_RETRY=${reply[6]}
     local TIMEOUT_CLEARNET=${reply[7]} CLEARNET_ENABLED=${reply[8]}
+    local MAX_REDIRECTS=${reply[9]}
 
     load_targets "$target_file" || return 1
     scan_targets=("${reply[@]}")

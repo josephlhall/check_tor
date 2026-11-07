@@ -84,7 +84,8 @@ assert_classify "empty reply" 52 000 DROP
 assert_classify "truncated transfer" 18 000 DROP
 assert_classify "timeout" 28 000 TIMEOUT
 assert_classify "connect failure" 7 000 TIMEOUT
-assert_classify "redirect loop" 47 000 WARN
+assert_classify "redirect follow limit" 47 000 WARN
+assert_contains "redirect stop is inconclusive" "subsequent access unobserved" "$detail"
 assert_classify "unexpected curl failure" 42 000 WARN
 
 reset_probe

@@ -24,8 +24,9 @@ from urllib.parse import urlsplit
 ROOT = Path(__file__).resolve().parent.parent
 SCANNER = ROOT / "check_tor.zsh"
 PREFLIGHT = "https://check.torproject.org/api/ip"
-FAKE = r"""import json, os, signal, subprocess, sys, time
+FAKE = r"""import json, os, re, signal, subprocess, sys, time
 from pathlib import Path
+from urllib.parse import urljoin
 args = sys.argv[1:]
 if "--version" in args:
     print("curl 8.7.1 synthetic offline fixture")
@@ -56,13 +57,41 @@ if response.get("child"):
     child = subprocess.Popen([sys.executable, "-c", "import signal,time; signal.signal(signal.SIGTERM,signal.SIG_IGN); time.sleep(60)"])
     (logs / (str(child.pid) + ".child.json")).write_text(json.dumps({"pid": child.pid}))
 time.sleep(response.get("delay", 0))
+chain_headers = None
+if "chain" in response:
+    chain = response["chain"]
+    limit = int(args[args.index("--max-redirs") + 1]) if "--max-redirs" in args else 0
+    current, followed, contacts, chain_headers = url, 0, [], ""
+    while True:
+        contacts.append(current)
+        item = chain[current]
+        code = item.get("code", 200)
+        headers = item.get("headers", "")
+        if "location" in item:
+            headers += "Location: " + item["location"] + "\r\n"
+        chain_headers += item.get("prefix", "") + "HTTP/1.1 " + str(code) + "\r\n" + headers + "\r\n"
+        location = re.search(r"(?im)^Location: *([^\r\n]*)", headers)
+        response = dict(item, code=code, redirects=followed, final_url=current)
+        if not 300 <= code < 400 or not location or "-L" not in args:
+            break
+        if followed >= limit:
+            response["exit"] = 47
+            response["error"] = "Maximum redirects followed"
+            response["next_url"] = urljoin(current, location[1])
+            break
+        current = urljoin(current, location[1])
+        followed += 1
+    # Record contacts as the fake performs them, separately from reported
+    # write-out fields. Tests assert the unvisited endpoint is absent here.
+    record["contacts"] = contacts
+    (logs / (str(os.getpid()) + ".contacts.json")).write_text(json.dumps(record))
 code = response.get("code", 200)
 body = response.get("body", "")
 if response.get("body_bytes"):
     body = "x" * response["body_bytes"]
 if url == "https://check.torproject.org/api/ip":
     body = '{"IsTor":' + ("false" if response.get("fail") else "true") + ',"IP":"192.0.2.123"}'
-headers = "HTTP/2 " + str(code) + "\r\n" + response.get("headers", "") + "\r\n"
+headers = chain_headers if chain_headers is not None else "HTTP/2 " + str(code) + "\r\n" + response.get("headers", "") + "\r\n"
 if "-D" in args:
     Path(args[args.index("-D") + 1]).write_text(headers)
 write_failed = False
@@ -79,7 +108,8 @@ if "-w" in args and not response.get("omit_writeout"):
     writeout = writeout.replace("\\n", "\n").replace("\\t", "\t").replace("\\r", "\r")
     values = {"http_code": code, "num_redirects": response.get("redirects", 0),
               "time_appconnect": response.get("tls", "0.1"),
-              "url_effective": response.get("final_url", url), "errormsg": response.get("error", "")}
+              "url_effective": response.get("final_url", url), "redirect_url": response.get("next_url", ""),
+              "errormsg": response.get("error", "")}
     for name, value in values.items():
         writeout = writeout.replace("%{" + name + "}", str(value))
     sys.stdout.write(writeout)

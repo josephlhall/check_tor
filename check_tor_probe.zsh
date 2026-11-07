@@ -4,6 +4,12 @@
 emulate -L zsh
 setopt no_unset
 source "${0:A:h}/check_tor.zsh"
+# The private coordinator validates this value before launching any adapter,
+# including the settings query; preflight never consumes it as a curl option.
+if [[ -n ${CHECK_TOR_MAX_REDIRECTS:-} ]]; then
+    parse_bounded_integer "$CHECK_TOR_MAX_REDIRECTS" --max-redirects 100 0 || exit 70
+    MAX_REDIRECTS=$REPLY
+fi
 if [[ ${1:-} == --settings && $# == 1 ]]; then
     json_quote "$USER_AGENT"; ua=$REPLY
     json_quote "$ACCEPT_HDR"; accept=$REPLY
@@ -97,13 +103,21 @@ if (( probe_local_failure )); then
 elif ! check_local_transport; then
     local_error='"local_curl_setup_or_io_failed"'
 fi
-code=null redirs=null final=null err=null limited=false transport_exit=null
+code=null redirs=null final=null next=null next_truncated=false err=null limited=false transport_exit=null
 (( probe_exit_known )) && transport_exit=$probe_exit
 [[ $probe_code == <-> && $probe_code != 000 ]] && code=$(( 10#$probe_code ))
 [[ $probe_redirs == <-> ]] && redirs=$(( 10#$probe_redirs ))
 [[ -n $probe_final ]] && { json_quote "$probe_final"; final=$REPLY; }
+# Bound this new private metadata value before JSON escaping. Python applies
+# the tighter UTF-8 byte bound to retained URLs; this character bound also
+# prevents a hostile Location from exhausting the bridge's result budget.
+if (( ${#${probe_next:-}} > 8192 )); then
+    next_truncated=true
+elif [[ -n ${probe_next:-} ]]; then
+    json_quote "$probe_next"; next=$REPLY
+fi
 [[ -n $probe_err ]] && { json_quote "$probe_err"; err=$REPLY; }
 (( probe_body_limited )) && limited=true
 (( probe_body_limited_known )) || limited=null
-printf '{"verdict":%s,"detail":%s,"http_status":%s,"curl_exit":%s,"curl_error":%s,"final_url":%s,"redirect_count":%s,"body_limited":%s,"tor_verified":%s,"local_error":%s}\n' \
- "$result_verdict" "$result_detail" "$code" "$transport_exit" "$err" "$final" "$redirs" "$limited" "$verified" "$local_error"
+printf '{"verdict":%s,"detail":%s,"http_status":%s,"curl_exit":%s,"curl_error":%s,"final_url":%s,"next_redirect_url":%s,"next_redirect_truncated":%s,"redirect_count":%s,"body_limited":%s,"tor_verified":%s,"local_error":%s}\n' \
+ "$result_verdict" "$result_detail" "$code" "$transport_exit" "$err" "$final" "$next" "$next_truncated" "$redirs" "$limited" "$verified" "$local_error"
