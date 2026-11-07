@@ -297,6 +297,38 @@ The primary outputs may be interpretive rather than algorithmic:
 
 The tool should not be modified merely to maximize agreement with a small sample.
 
+## Optional detailed scanner observations
+
+The opt-in `--format jsonl-v2` contract preserves individual automated requests,
+run lifecycle, effective settings, and explicit target/trial/pair identities.
+[Detailed measurement output](DETAILED-OUTPUT.md) defines that instrument and
+its fixed-trial, control-order, routing, concurrency, and pacing policies.
+The existing text and JSONL v1 interfaces and default stopping rules remain
+available. Neither the new format nor its scheduling options amend frozen
+`TACP-0.2` or retroactively add evidence to the completed pilot.
+
+Fixed trials retain successful as well as unsuccessful observations. They do
+not make repeated requests statistically independent. Paired paths are
+sequential, their start-to-start gap is recorded, and late or missing partners
+remain visible. A shared target-level control is not a matched control for
+every trial. Native verdicts remain automated curl outcomes, not browser
+access claims or evidence of deliberate site policy.
+
+Bounded workers share Tor and network capacity. Global pacing controls the
+coordinator's top-level probe invocations, including preflight; it does not
+bound redirect hops, packet starts, or aggregate traffic to a provider reached
+through several hostnames. New scheduling policies use explicit reproducible
+proxy routing while preserving TLS trust configuration. Legacy mode records
+inherited routing as uncertain rather than asserting that a nominal direct
+request necessarily bypassed every configured proxy.
+
+Offline fixtures establish record and scheduling behavior, including failure
+and interruption handling. They do not establish live-site accuracy, distinct
+exit relays, browser equivalence, or calibration of any new collection design.
+Future governed measurement must freeze its chosen settings and protocol
+prospectively. Raw detailed output remains sensitive and belongs outside the
+repository; it contains no response bodies or exit-IP enrichment.
+
 ## Proposed observation record
 
 The frozen observation record in
