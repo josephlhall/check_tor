@@ -28,21 +28,18 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install zsh on Linux
+      - name: Install test tools on Linux
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install --yes zsh
-
-      - name: Verify effective measurement curl trust
-        run: zsh scripts/check-curl-trust.zsh
+          sudo apt-get install --yes zsh openssl
 
       - name: Verify executable mode
         run: test -x check_tor.zsh
 
       - name: Check zsh syntax
         run: |
-          for script in check_tor.zsh check_tor_core.zsh check_tor_probe.zsh scripts/*.zsh tests/*.zsh; do
+          for script in check_tor.zsh check_tor_core.zsh check_tor_probe.zsh tests/*.zsh; do
             zsh -n "$script" || exit
           done
 
@@ -59,10 +56,8 @@ jobs:
           python3 -m unittest discover -s tests -p 'test_redirects.py'
           python3 -m unittest discover -s tests -p 'test_retry_after.py'
 
-      - name: Run offline trust-control tests
-        run: |
-          python3 -m unittest discover -s tests -p 'test_curl_trust.py'
-          python3 -m unittest discover -s tests -p 'macos_tls_defaults_test.py'
+      - name: Run local TLS tests
+        run: python3 -m unittest discover -s tests -p 'test_tls.py'
 
       - name: Verify Apple Python compatibility
         if: runner.os == 'macOS'
