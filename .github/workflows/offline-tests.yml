@@ -210,7 +210,10 @@ jobs:
         run: test -x check_tor.zsh
 
       - name: Check zsh syntax
-        run: zsh -n check_tor.zsh check_tor_core.zsh check_tor_probe.zsh scripts/*.zsh tests/*.zsh
+        run: |
+          for script in check_tor.zsh check_tor_core.zsh check_tor_probe.zsh scripts/*.zsh tests/*.zsh; do
+            zsh -n "$script" || exit
+          done
 
       - name: Run offline regression tests
         run: zsh tests/check_tor_test.zsh

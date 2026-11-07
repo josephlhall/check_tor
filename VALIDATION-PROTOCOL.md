@@ -1,5 +1,15 @@
 # Tor Access Comparison Protocol
 
+This document preserves `TACP-0.2`, the procedure used for the completed
+[issue #33 pilot](VALIDATION-PILOT-MANIFEST.md). It pairs the scanner's
+automated result with observations of a person doing the same defined public
+task in Tor Browser and an ordinary browser. The five-case
+[issue #32 dry run](VALIDATION-DRY-RUN.md) used `TACP-0.1`. Its findings led to
+one revision, which the reviewer froze on 2026-08-30 for issue #33.
+
+The [prospective reference protocol](VALIDATION-REFERENCE-PROTOCOL.md)
+describes the method approved for preparing a later study.
+
 > **Status:** FROZEN FOR ISSUE #33
 >
 > **Protocol ID:** TACP-0.2
@@ -17,65 +27,52 @@
 >
 > **Operational fields:** Resolved at preflight on 2026-08-30
 
-This document is the normative manual protocol for comparing `check_tor`
-observations with browser access outcomes. Revision `TACP-0.1` governed the
-completed issue #32 dry run. The human reviewer accepted this single
-evidence-driven revision as `FROZEN FOR ISSUE #33` on 2026-08-30. Issue #33
-later completed collection under its separately approved manifest and live
-authority; the protocol freeze alone never authorized that traffic.
-
-The ethical and data-handling rules in
-[ETHICS-AND-DATA-STEWARDSHIP.md](ETHICS-AND-DATA-STEWARDSHIP.md) can stop or
-restrict any step in this protocol. Current scanner code and the documented
-JSONL schema remain authoritative for what the scanner does. If those sources
-conflict with this protocol, stop and record the mismatch; do not reinterpret
-an observation after seeing the result.
+The [stewardship policy](ETHICS-AND-DATA-STEWARDSHIP.md) can stop or restrict
+any step. Use the recorded scanner commit and JSONL schema to interpret what
+the scanner observed. If they conflict with this protocol, stop and record
+the mismatch. Do not reinterpret the observation after seeing the result.
 
 ## Purpose and study boundary
 
-The project studies whether an automated `curl`-over-Tor scanner describes the
-practical access available to a human Tor Browser user.
+The dry run tested whether the procedure could distinguish three observations.
+The scanner recorded how an automated request behaved over Tor. The reviewer
+recorded whether they could complete the same task in Tor Browser and in an
+ordinary browser over a direct connection. The dry run also tested whether the
+reviewer could collect those observations while minimizing sensitive data.
 
-In plain language, this protocol compares what `check_tor` reports with what a
-person can reach using Tor Browser. More technically, the five-case dry run
-tests whether a small paired-instrument procedure can compare automated Tor
-traffic, Tor Browser task outcomes, and ordinary-browser controls without
-confusing those instruments or collecting unnecessary sensitive material.
+The dry run could show whether a field, timing rule, rubric, order assignment,
+or safeguard needed revision. The five chosen cases leave the following
+questions open.
 
-The five-case dry run tests the **procedure**, not scanner accuracy. It may show
-that a field, timing rule, rubric, order assignment, or safeguard needs revision.
-It cannot establish:
+- What are the scanner's accuracy, sensitivity, specificity, and error rates?
+- How common are Tor blocking and friction?
+- What did a site intend, or what site-wide policy did it apply?
+- How do outcomes vary across Tor users, exits, countries, dates, or security
+  levels?
+- Did the scanner and Tor Browser use the same exit?
+- Did separate scanner circuits use distinct exits?
+- Does a verdict predict human browser access beyond the five chosen cases?
 
-- accuracy, sensitivity, specificity, or error rates;
-- prevalence of Tor blocking or friction;
-- a site's intent or site-wide policy;
-- performance across Tor users, exits, countries, dates, or security levels;
-- that the scanner and Tor Browser used the same exit;
-- that separate scanner circuits used distinct exits; or
-- that a verdict predicts human browser access beyond the five deliberately
-  chosen cases.
-
-The later stratified pilot in issue #33 is outside this completed five-case
-dry-run evidence. Its per-case protocol prerequisite is complete: this
-document completed the dry run, received its one evidence-driven revision, and
-was explicitly marked `FROZEN FOR ISSUE #33`. Before any pilot collection, the human
-reviewer must approve an experiment-level pilot manifest and grant separate
-explicit live authority. That manifest must freeze the approved endpoints,
-sample allocation or stopping rule, current environment, order schedule, batch
-plan, storage boundary, and remote-observation mode without silently revising
-this per-case procedure.
+Issue #33 was a separate study with cases deliberately chosen to exercise
+different scanner verdicts. Its [approved manifest](VALIDATION-PILOT-MANIFEST.md)
+set the endpoints, sample and stopping rule, environment, order, batch plan,
+storage rules, and remote-observation setup. The reviewer separately granted
+live authority after the readiness checks. Any future live use requires its
+own approved manifest and explicit authority. A material change to the
+per-case method requires a new protocol revision.
 
 ## Measurement contract
 
 ### Direct scanner observations
 
 `check_tor` directly observes how its fixed `curl` request profile behaves over
-a local Tor SOCKS proxy. It records `curl` and HTTP outcomes, follows redirects,
-inspects a bounded response body, and classifies the result. For a persistent
+a local Tor SOCKS proxy. It follows redirects, inspects a bounded response
+body, and classifies the result from `curl` and HTTP outcomes. For a persistent
 block-like Tor result it normally makes a conditional automated clearnet
 `curl` request.
 
-The JSONL target record is the authoritative scanner observation. It includes:
+The schema version 1 JSONL target record is the authoritative scanner
+observation for this protocol. Its fields include the following.
 
 - `schema_version`, `type`, and `target`;
 - `verdict` and human-readable `detail`;
@@ -178,39 +175,35 @@ Record all timestamps in UTC using an unambiguous ISO 8601 form such as
 
 ## Frozen environment record
 
-This table preserves the reviewed `TACP-0.2` baseline used to complete issue
-#32. It is not an issue #33 pilot manifest and does not authorize live work.
-Before any separately authorized pilot collection, the human reviewer must
-reverify the current environment and approve the experiment-level manifest
-described above. Any change that materially alters the per-case method requires
-a new protocol revision; otherwise, record the verified current value in the
-approved pilot material rather than treating this historical baseline as a
-fresh measurement.
+This table records the environment used for the issue #32 dry run under
+`TACP-0.1` and preserved in `TACP-0.2`. The reviewer reverified the environment
+before authorizing the later pilot. See the [pilot manifest](VALIDATION-PILOT-MANIFEST.md)
+for the values used in issue #33.
 
 | Field | Frozen value |
 |---|---|
 | Protocol name | Tor Access Comparison Protocol (TACP) |
 | Protocol ID | `TACP-0.2` |
 | Scanner repository | `josephlhall/check_tor` |
-| Scanner commit | `fc13260f87c01e56db376858d90d837abcda1eaa`; reverify before any separately authorized issue #33 collection |
+| Scanner commit | `fc13260f87c01e56db376858d90d837abcda1eaa` |
 | JSONL schema | `1` |
 | Scanner proxy | `localhost:9050` |
 | Tor attempt limit | `3` |
 | First/retry/clearnet timeouts | `60` / `30` / `20` seconds |
 | Automated clearnet control | Enabled |
 | HTTP request profile | Fixed by scanner commit |
-| Response inspection limit | Fixed by scanner commit; currently 1 MiB |
+| Response inspection limit | 1 MiB at the recorded scanner commit |
 | Operating system and version | macOS 26.6.2 (build 25G83) |
 | `zsh` version | 5.9 (`arm64-apple-darwin25.0`) |
-| `curl` version | Apple `/usr/bin/curl` 8.7.1, reporting `x86_64-apple-darwin25.0` in the current Codex environment |
+| `curl` version | Apple `/usr/bin/curl` 8.7.1, reporting `x86_64-apple-darwin25.0` in the dry-run environment |
 | Tor version and distribution | Homebrew Tor 0.4.9.11 at `/opt/homebrew/opt/tor` |
 | Tor Browser version | 15.0.20, installed from the Homebrew cask in `/Applications/Tor Browser.app` |
 | Tor Browser security level | `Standard`, visually verified by the owner on 2026-08-30 |
 | Tor Browser extensions/configuration | Newly installed stock build; only bundled NoScript and system theme active; verified 2026-08-30 |
 | Ordinary browser and version | Firefox 154.0.1 |
-| Ordinary-browser profile rule | Dedicated owner-only profile at `/Users/josephhall/Library/Application Support/check_tor/issue-32/raw/firefox-profile`; no sign-in or added extensions; fresh private window for each case; verified 2026-08-30 |
+| Ordinary-browser profile rule | Dedicated owner-only profile at the location recorded in the private environment record; no sign-in or added extensions; fresh private window for each case; verified 2026-08-30 |
 | Local time synchronization check | macOS `timed` service running; owner visually confirmed automatic time enabled on 2026-08-30 |
-| Private study-data root | `/Users/josephhall/Library/Application Support/check_tor/issue-32`, owner-only (`0700`), with `structured/` and `raw/` |
+| Private study-data root | Location recorded in the private environment record, owner-only (`0700`), with `structured/` and `raw/` |
 | Backup treatment | Time Machine reports the study root as excluded; verified 2026-08-29 |
 | Restricted raw-artifact retention | Delete after row audit and no later than 30 days after collection; approved 2026-08-29 |
 | Structured-observation retention | Delete or formally extend within 90 days after issue #33 review closes; approved 2026-08-29 |
@@ -282,7 +275,7 @@ CAPTCHAs, “prove you are human” tasks requiring interaction, login prompts,
 consent flows that disclose data, or access-control workarounds must not be
 completed. Record the boundary encountered and stop that task.
 
-### Proposed retry rule
+### Approved retry rule
 
 Each primary browser permits at most one ordinary reload when the initial page
 does not reach a stable outcome because of a transient stall or incomplete

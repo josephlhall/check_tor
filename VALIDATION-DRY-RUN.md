@@ -1,5 +1,12 @@
 # Tor Access Comparison Protocol: Five-Case Dry Run
 
+The five-case dry run completed all three planned observations in every case
+and stayed within the 15-minute window. It also showed where the record needed
+work. The reviewer approved separate browser records, a field for the time it
+took to reach a stable outcome, and a rule for capturing exact start and end times.
+Those changes became [`TACP-0.2`](VALIDATION-PROTOCOL.md), the frozen procedure
+for the later pilot.
+
 > **Status:** ACCEPTED
 >
 > **Evidence protocol:** `TACP-0.1`
@@ -14,10 +21,8 @@
 >
 > **Freeze accepted:** Joseph Lorenzo Hall, 2026-08-30
 
-This note records procedural evidence from the issue #32 dry run. It does not
-publish raw observation rows, scanner output, screenshots, browser notes,
-observed IP addresses, or private storage paths. It does not estimate scanner
-accuracy or the prevalence of any behavior.
+This note reports procedural evidence from issue #32 in aggregate. The dry run
+tested whether the procedure was practical with purpose-built public endpoints.
 
 ## Scope
 
@@ -124,11 +129,10 @@ private observation row was added to the repository.
   operator policy.
 - Certificate-boundary cases do not test behavior after a warning bypass.
 - The unexplained Tor Browser delay supports no causal claim.
-- `TACP-0.2` is frozen as the methodological basis for issue #33, but live
-  issue #33 collection remains separately unauthorized.
 
 ## Human freeze decision
 
 Joseph Lorenzo Hall accepted this sanitized note and the single `TACP-0.2`
-revision on 2026-08-30. The protocol is `FROZEN FOR ISSUE #33`. This decision
-does not authorize the issue #33 pilot or any additional live collection.
+revision on 2026-08-30, freezing the procedure for issue #33. The freeze
+covered the procedure only. The later [pilot manifest](VALIDATION-PILOT-MANIFEST.md)
+records the separate approval that authorized issue #33 collection.
