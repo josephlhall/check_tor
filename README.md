@@ -1,13 +1,17 @@
 # Tor Reachability Scanner
 
-A `zsh` utility script that probes a list of domains through a local Tor SOCKS
-proxy. It classifies automated HTTPS outcomes such as HTTP
-refusals, challenge-like responses, TLS failures, and SOCKS failures. For a
-persistent block-like result, an automated clearnet control can show whether
-the Tor request fared worse. Recognized response signatures can suggest the
-edge or WAF involved; they do not by themselves establish site policy or the
-practical access available to a human Tor Browser user. By Joseph Lorenzo Hall, PhD
-(<https://josephhall.org/>)
+A command-line tool for measuring website reachability over Tor with `curl`.
+Its `zsh` core probes domain lists through a local Tor SOCKS proxy and
+classifies automated HTTPS outcomes, including HTTP refusals, challenge-like
+responses, TLS failures, and SOCKS failures. For a persistent block-like
+result, an automated clearnet control can show whether the Tor request fared
+worse. An optional Python coordinator adds repeated trials, paired Tor/direct
+controls, and detailed JSONL evidence.
+
+These comparisons describe the sampled automated requests. Recognized response
+signatures can suggest the edge or WAF involved; they do not by themselves
+establish site policy or the practical access available to a human Tor Browser
+user. By Joseph Lorenzo Hall, PhD (<https://josephhall.org/>).
 
 ## Prerequisites & Installation
 
@@ -506,5 +510,7 @@ The script evaluates `curl` exit codes, HTTP status codes, and response contents
   cutoff—is left for manual triage.
 
 ## License
+
+Created by Joseph Lorenzo Hall, 2026.
 
 This project is dedicated to the public domain under CC0 1.0 Universal. See the `LICENSE` file for details.
