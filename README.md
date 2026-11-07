@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/branding/check-tor-reverse.svg">
+  <img src="assets/branding/check-tor.svg" width="96" height="96" alt="check_tor logo: an onion outline with a checkmark">
+</picture>
+
 # Tor Reachability Scanner
 
 `check_tor` sends automated requests through a local Tor proxy and reports what
@@ -6,6 +11,9 @@ failures. If a result such as a refusal or timeout persists, the scanner can
 compare the outcome with a second request outside Tor. Use Tor Browser to
 check whether a person can load a page or complete a task. Curl and Tor Browser
 can receive different responses or handle the same response differently.
+
+`check_tor` is an independent volunteer project by a Tor donor and fan. It is
+not affiliated with or endorsed by [The Tor Project](https://www.torproject.org/).
 
 ## Run your first scan
 
@@ -277,3 +285,5 @@ verify releases.
 
 Created by [Joseph Lorenzo Hall](https://josephhall.org/), 2026. The project
 is dedicated to the public domain under [CC0 1.0 Universal](LICENSE).
+
+See the [branding guide](BRANDING.md) for artwork and suggested visual style.
