@@ -14,7 +14,8 @@ practical access available to a human Tor Browser user. By Joseph Lorenzo Hall, 
 This script requires `zsh`, `curl`, and a local `tor` proxy to run. At runtime
 it also uses standard command-line utilities (`awk`, `grep`, `head`, `cut`,
 `tr`, `wc`, and `mktemp`), which are available by default on supported macOS
-and Debian/Ubuntu installations.
+and Debian/Ubuntu installations. The optional `--format jsonl-v2` measurement
+mode additionally requires Python 3.9 or newer (standard library only).
 
 ### For macOS
 1. **Install dependencies via Homebrew:**
@@ -189,6 +190,22 @@ JSONL output contains the scanned targets and is sensitive operational data.
 Store it outside this repository with restrictive permissions; do not add it to
 Git or place it under a publicly accessible path.
 
+### Detailed requests, fixed trials, and bounded concurrency
+
+`--format jsonl-v2` preserves individual requests and explicit run start/end
+records. With no new policy options, it observes the existing failure retries
+and conditional controls. `--trials` selects a fixed number of observations;
+`--control always --control-scope trial` pairs a direct control with each Tor
+trial, including successful ones. Optional ordering, a recorded seed, partner-gap
+flags, bounded target workers, and global probe-start pacing support repeatable
+schedules. All these policies retain the existing probe and classifier.
+
+This mode requires Python 3.9+ and has its own versioned contract. It does not
+change text output or JSONL v1. Read [Detailed measurement output](DETAILED-OUTPUT.md)
+for examples, supported combinations, record identities, routing guarantees,
+clock and interruption semantics, and limits on interpreting paired results.
+Missing terminal records mean incomplete runs, not successful completion.
+
 ## Measurement limitations and validation
 
 `check_tor` measures how sites respond to automated `curl` requests over Tor;
@@ -285,7 +302,7 @@ The regression suites are deterministic and offline. They use synthetic
 `.example.test` targets and temporary files; they never inspect `targets.txt`, `scans/`, or
 `*.private.txt`. You do not need a running Tor proxy or Internet access.
 
-The repository has four complementary suites:
+The repository has five complementary suites:
 
 * `tests/check_tor_test.zsh` exercises the decision logic directly, including
   curl and HTTP classification, WAF fingerprints, retry eligibility, severity,
@@ -295,6 +312,9 @@ The repository has four complementary suites:
   source-safe loading, target parsing and normalization, circuit retries,
   clearnet controls, validated setting overrides, output summaries, curl
   arguments, and temporary-file cleanup without reaching the network.
+* `tests/test_measurement.py` checks detailed records, trial/control policies,
+  routing, seeded ordering, global pacing, worker limits, cancellation, and
+  output failures using synthetic per-request fake-curl fixtures.
 * `tests/test_curl_trust.py` checks the macOS bundle filter against the two
   public affected roots and verifies positive-control and certificate-specific
   negative-control handling with fake curl and Git clients, including connection
@@ -306,9 +326,11 @@ Run the complete local validation from the repository root:
 
 ```zsh
 test -x check_tor.zsh
-zsh -n check_tor.zsh check_tor_core.zsh scripts/*.zsh tests/*.zsh
+zsh -n check_tor.zsh check_tor_core.zsh check_tor_probe.zsh scripts/*.zsh tests/*.zsh
 zsh tests/check_tor_test.zsh
 zsh tests/check_tor_integration_test.zsh
+python3 -m unittest discover -s tests -p 'test_measurement.py'
+python3 -m unittest discover -s tests -p 'test_transport_review.py'
 python3 -m unittest discover -s tests -p 'test_curl_trust.py'
 python3 -m unittest discover -s tests -p 'macos_tls_defaults_test.py'
 git diff --check

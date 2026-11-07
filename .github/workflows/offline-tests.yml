@@ -210,13 +210,18 @@ jobs:
         run: test -x check_tor.zsh
 
       - name: Check zsh syntax
-        run: zsh -n check_tor.zsh check_tor_core.zsh scripts/*.zsh tests/*.zsh
+        run: zsh -n check_tor.zsh check_tor_core.zsh check_tor_probe.zsh scripts/*.zsh tests/*.zsh
 
       - name: Run offline regression tests
         run: zsh tests/check_tor_test.zsh
 
       - name: Run offline integration tests
         run: zsh tests/check_tor_integration_test.zsh
+
+      - name: Run offline detailed-measurement tests
+        run: |
+          python3 -m unittest discover -s tests -p 'test_measurement.py'
+          python3 -m unittest discover -s tests -p 'test_transport_review.py'
 
       - name: Run offline trust-control tests
         run: |

@@ -5,9 +5,9 @@
 # rate limit, silent drop, TLS breakage) before deciding a site "blocks Tor".
 # https://github.com/josephlhall/check_tor
 #
-# The scanner is deliberately serial. Each probe replaces a shared set of
-# result variables and temporary response files; the scan loop classifies and
-# snapshots those results before starting another probe.
+# The legacy scan loop is deliberately serial: probes replace shared result
+# variables and response files. Detailed mode invokes these same definitions in
+# isolated processes so its coordinator can safely overlap different targets.
 
 # ----------------------------------------------------------------- config ---
 
@@ -42,6 +42,8 @@ CLEARNET_ENABLED=1
 # fingerprint beyond the prefix can be missed, so reaching the cap is reported
 # as inconclusive rather than as evidence that the site blocks Tor.
 MAX_BODY_BYTES=$(( 1024 * 1024 ))
+MAX_REDIRECTS=10
+PREFLIGHT_TIMEOUT=10
 
 # Browser-like headers reduce trivial bot-fingerprint differences, but they do
 # not make curl equivalent to Chrome: TLS and JavaScript behavior still differ.
@@ -152,6 +154,7 @@ usage() {
     print -r -- ""
     print -r -- "Options:"
     print -r -- "  --format text|jsonl       Select human text (default) or JSON Lines output."
+    print -r -- "  --format jsonl-v2         Detailed requests and run records (requires Python 3.9+)."
     print -r -- "  --proxy HOST:PORT         Tor SOCKS proxy (default: localhost:9050)."
     print -r -- "  --circuits COUNT          Maximum Tor attempts, 1–100 (default: 3)."
     print -r -- "  --timeout-first SECONDS   First Tor attempt, 1–3600 (default: 60)."
@@ -159,6 +162,18 @@ usage() {
     print -r -- "  --timeout-clearnet SECONDS  Clearnet control, 1–3600 (default: 20)."
     print -r -- "  --no-clearnet             Skip the clearnet control comparison."
     print -r -- "  -h, --help                Show this help and exit."
+    print -r -- ""
+    print -r -- "Detailed-mode options (require --format jsonl-v2):"
+    print -r -- "  --run-id TEXT, --group-id TEXT  Opaque labels for downstream consumers."
+    print -r -- "  --trials COUNT            Fixed Tor trials, 1–100; replaces failure retries."
+    print -r -- "  --control conditional|always|never  Default: conditional."
+    print -r -- "  --control-scope target|trial  Default: target; trial requires --trials."
+    print -r -- "  --order tor-first|direct-first|counterbalanced  Default: tor-first."
+    print -r -- "  --seed INTEGER            Required for counterbalanced order."
+    print -r -- "  --max-partner-gap SECONDS Maximum paired start gap (default: 60)."
+    print -r -- "  --reproducible            Explicit proxy routing; trial policies imply it."
+    print -r -- "  --workers COUNT          Active target bundles, 1–32 (default: 1)."
+    print -r -- "  --start-gap SECONDS       Global probe-start interval, 0–3600 (default: 0)."
     print -r -- ""
     print -r -- "Environment:"
     print -r -- "  NO_COLOR    Disable ANSI color styling."
@@ -225,18 +240,60 @@ validate_proxy() {
 
 # ----------------------------------------------------------------- probes ---
 
+# Each request owns these two tiny status files alongside BODY. Retain curl's
+# transport result independently so a local reader or status-file failure cannot
+# be mistaken for a native site outcome.
+probe_curl() {
+    local curl_result
+    curl "$@"
+    curl_result=$?
+    print -r -- "$curl_result" > "$BODY.curl-status" || return 70
+    return "$curl_result"
+}
+
+probe_body_sink() {
+    local sink_result
+    head -c "$MAX_BODY_BYTES" > "$BODY"
+    sink_result=$?
+    print -r -- "$sink_result" > "$BODY.sink-status" || return 70
+    return "$sink_result"
+}
+
+probe_read_status() {
+    local sink_result=""
+    probe_exit=1 probe_exit_known=1
+    if ! read -r probe_exit < "$BODY.curl-status" || [[ $probe_exit != <-> ]]; then
+        probe_exit=1 probe_exit_known=0
+        probe_local_failure=1
+    fi
+    if ! read -r sink_result < "$BODY.sink-status" || [[ $sink_result != 0 ]]; then
+        probe_local_failure=1
+    fi
+    rm -f "$BODY.curl-status" "$BODY.sink-status" || probe_local_failure=1
+}
+
 # probe <url> <circuit-tag|""> <timeout>
 # An empty circuit tag means a direct (clearnet) request with no proxy.
 # The timeout is in seconds. Results replace the probe_* globals plus $BODY,
 # $HDRS (every redirect hop), and $LASTH (the final hop only); callers must
 # consume or copy them before the next probe.
 probe() {
+    # Detailed reproducible runs supply explicit proxy-bypass rules. Legacy
+    # calls leave this dynamically scoped array unset and retain curl's behavior.
     local -a via=()
+    (( ${+CHECK_TOR_PROBE_ARGS} )) && via=("${CHECK_TOR_PROBE_ARGS[@]}")
     # socks5-hostname keeps DNS resolution inside Tor. The tag is a disposable
     # SOCKS username, not a credential: with Tor's default IsolateSOCKSAuth,
     # changing it asks Tor to place the stream on a fresh circuit.
-    [[ -n "$2" ]] && via=(--socks5-hostname "$TOR_PROXY" --proxy-user "$2:x")
-    : > "$BODY"; : > "$HDRS"; : > "$LASTH"
+    [[ -n "$2" ]] && via+=(--socks5-hostname "$TOR_PROXY" --proxy-user "$2:x")
+    probe_local_failure=0
+    probe_body_limited_known=0
+    probe_exit_known=0
+    probe_exit=1 probe_code=000 probe_redirs="" probe_tls=0 probe_final="" probe_err="" probe_body_limited=0
+    local response_file
+    for response_file in "$BODY" "$HDRS" "$LASTH" "$BODY.curl-status" "$BODY.sink-status"; do
+        : > "$response_file" || { probe_local_failure=1; return 1; }
+    done
     probe_timeout=$3
     local out
     # curl's tab-delimited write-out is the probe's machine interface. Stderr
@@ -249,25 +306,46 @@ probe() {
     # head closes the pipe; probe_body_limited distinguishes that intentional
     # cutoff from an unrelated destination failure.
     # Ignore ambient curlrc credentials and TLS/request overrides. Keep -q first.
-    out=$(curl -q -s -o >(head -c "$MAX_BODY_BYTES" > "$BODY") \
-        -D "$HDRS" -L --max-redirs 10 \
+    # A shell-function invocation waits for its process substitutions in Zsh.
+    # Without this wrapper, curl can exit before head has finished writing BODY,
+    # leaving classification and the body-cap check racing that final write.
+    out=$(probe_curl -q -s -o >(probe_body_sink) \
+        -D "$HDRS" -L --max-redirs "$MAX_REDIRECTS" \
         -A "$USER_AGENT" -H "$ACCEPT_HDR" -H "$LANG_HDR" \
         "${via[@]}" --max-time "$3" \
         -w '%{http_code}\t%{num_redirects}\t%{time_appconnect}\t%{url_effective}\t%{errormsg}' \
         "$1" 2>/dev/null)
-    probe_exit=$?
+    probe_read_status
     local body_bytes
-    body_bytes=$(wc -c < "$BODY")
-    probe_body_limited=$(( body_bytes >= MAX_BODY_BYTES ))
-    IFS=$'\t' read -r probe_code probe_redirs probe_tls probe_final probe_err <<< "$out"
-    probe_code=${probe_code:-000}
+    if ! body_bytes=$(wc -c < "$BODY"); then
+        probe_local_failure=1
+        body_bytes=""
+    fi
+    body_bytes=${body_bytes//[[:space:]]/}
+    if [[ $body_bytes == <-> ]]; then
+        probe_body_limited_known=1
+        probe_body_limited=$(( body_bytes >= MAX_BODY_BYTES ))
+    else
+        probe_local_failure=1
+        probe_body_limited_known=0
+    fi
+    # IFS treats tabs as whitespace and collapses empty columns. Preserve them
+    # so unavailable TLS/final-URL metadata cannot shift a diagnostic into a URL.
+    local -a probe_fields=("${(@ps:\t:)out}")
+    probe_code=${probe_fields[1]:-000}
+    probe_redirs=${probe_fields[2]:-}
+    probe_tls=${probe_fields[3]:-0}
+    probe_final=${probe_fields[4]:-}
+    probe_err=""
+    (( ${#probe_fields} >= 5 )) && probe_err="${(pj:\t:)probe_fields[5,-1]}"
 
     # With -L, curl appends *every* redirect hop's headers to $HDRS. Isolate
     # the final block: a cf-ray on an intermediate redirect says nothing about
     # who served the response we actually landed on, and grepping the whole
     # file would credit that hop's WAF with the final hop's verdict.
     awk '/^HTTP\//{n=NR} {l[NR]=$0} END{for (i=n; i<=NR; i++) print l[i]}' \
-        "$HDRS" > "$LASTH"
+        "$HDRS" > "$LASTH" || probe_local_failure=1
+    return 0
 }
 
 # Parse and validate the complete invocation before any dependency check or
@@ -467,7 +545,7 @@ tor_preflight() {
     fi
     # This checks more than whether a SOCKS port accepts connections: Tor's service
     # confirms that the request emerged from its network and reports the exit IP.
-    tor_check=$(curl -q -s --socks5-hostname "$TOR_PROXY" --max-time 10 https://check.torproject.org/api/ip)
+    tor_check=$(curl -q -s --socks5-hostname "$TOR_PROXY" --max-time "$PREFLIGHT_TIMEOUT" https://check.torproject.org/api/ip)
 
     if [[ "$tor_check" == *'"IsTor":true'* ]]; then
         exit_ip=${tor_check#*\"IP\":\"} exit_ip=${exit_ip%%\"*}
@@ -607,6 +685,46 @@ main() {
     local parse_status target_file
     local -a scan_targets
 
+    # Keep the established CLI/parser and its source-callable contract intact.
+    # The detailed coordinator is opt-in and invokes the same probe/classifier.
+    local selected_format=text expect_format=0 arg
+    for arg in "$@"; do
+        if (( expect_format )); then
+            selected_format=$arg
+            expect_format=0
+        elif [[ $arg == -- ]]; then
+            break
+        elif [[ $arg == --format ]]; then
+            expect_format=1
+        elif [[ $arg == --format=* ]]; then
+            selected_format=${arg#*=}
+        fi
+    done
+    if [[ $selected_format == jsonl-v2 ]]; then
+        if (( ! $+commands[python3] )); then
+            print -u2 -r -- "Error: --format jsonl-v2 requires Python 3.9 or newer."
+            return 1
+        fi
+        # Keep main callable from a sourced shell: exec would replace its caller.
+        # Forward cancellation to the coordinator, which owns its request groups,
+        # and wait again if a signal interrupted our first wait. localtraps above
+        # restores the caller's handlers when main returns.
+        local detailed_pid="" detailed_status=0
+        trap '[[ -z $detailed_pid ]] || kill -INT "$detailed_pid" 2>/dev/null || true' INT
+        trap '[[ -z $detailed_pid ]] || kill -TERM "$detailed_pid" 2>/dev/null || true' TERM
+        command python3 "$CHECK_TOR_DIR/check_tor_measure.py" "$@" &
+        detailed_pid=$!
+        while true; do
+            if wait "$detailed_pid"; then
+                detailed_status=0
+            else
+                detailed_status=$?
+            fi
+            kill -0 "$detailed_pid" 2>/dev/null || break
+        done
+        return "$detailed_status"
+    fi
+
     configure_output
 
     parse_args "$@"
@@ -630,7 +748,7 @@ main() {
     # localtraps, cleanup runs when main returns and the caller's traps are
     # restored if main was invoked from a sourced script.
     BODY=$(mktemp) HDRS=$(mktemp) LASTH=$(mktemp)
-    trap 'rm -f "$BODY" "$HDRS" "$LASTH"' EXIT INT TERM
+    trap 'rm -f "$BODY" "$HDRS" "$LASTH" "$BODY.curl-status" "$BODY.sink-status"' EXIT INT TERM
 
     tor_preflight || return 1
     run_scan "${scan_targets[@]}"

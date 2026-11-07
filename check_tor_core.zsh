@@ -1,12 +1,32 @@
 # Decision logic shared by the scanner and its offline regression tests.
 # Callers provide probe_* globals and BODY/LASTH fixture paths.
 
+# grep's exit 1 means no match; any other failure makes classification
+# unavailable. Keep this flag in the caller shell rather than in a pipeline or
+# command substitution, so v2 cannot mistake a failed inspection for a PASS.
+classify_matches() {
+    local match_status
+    grep "$@"
+    match_status=$?
+    (( match_status > 1 )) && probe_local_failure=1
+    return "$match_status"
+}
+
 # Identify who issued the final response, from $LASTH and the body.
 blocker_id() {
     blocker=""
-    local cf_err
-    cf_err=$(grep -aoE 'error code: 1[0-9]{3}' "$BODY" | grep -oE '1[0-9]{3}' | head -1)
-    if grep -qia '^cf-mitigated:.*challenge' "$LASTH"; then
+    local cf_err match_status error_header
+    cf_err=$(grep -aom1 -E 'error code: 1[0-9]{3}' "$BODY")
+    match_status=$?
+    if (( match_status > 1 )); then
+        probe_local_failure=1
+        return 70
+    fi
+    # -m1 limits matching lines; a line may still contain several matches.
+    # Shell extraction avoids pipelines that could hide a utility failure.
+    local -a cf_matches=("${(@f)cf_err}")
+    cf_err=${cf_matches[1]#'error code: '}
+    if classify_matches -qia '^cf-mitigated:.*challenge' "$LASTH"; then
         blocker="Cloudflare challenge (cf-mitigated)"
     elif [[ -n "$cf_err" ]]; then
         case "$cf_err" in
@@ -15,19 +35,28 @@ blocker_id() {
             1006|1007|1008|1106) blocker="Cloudflare $cf_err: IP banned" ;;
             *)                   blocker="Cloudflare error $cf_err" ;;
         esac
-    elif grep -qa 'Just a moment' "$BODY" || grep -qa 'cf-chl' "$BODY"; then
+    elif classify_matches -qa 'Just a moment' "$BODY" || classify_matches -qa 'cf-chl' "$BODY"; then
         blocker="Cloudflare challenge page"
-    elif grep -qia '^cf-error-type:' "$LASTH"; then
-        blocker="Cloudflare error ($(grep -aim1 '^cf-error-type:' "$LASTH" | cut -d: -f2- | tr -d ' \r'))"
-    elif grep -qia '^cf-ray:' "$LASTH"; then
+    elif classify_matches -qia '^cf-error-type:' "$LASTH"; then
+        error_header=$(grep -aim1 '^cf-error-type:' "$LASTH")
+        match_status=$?
+        if (( match_status > 1 )); then
+            probe_local_failure=1
+            return 70
+        fi
+        error_header=${error_header#*:}
+        error_header=${error_header//[$' \r']/}
+        blocker="Cloudflare error ($error_header)"
+    elif classify_matches -qia '^cf-ray:' "$LASTH"; then
         blocker="served by Cloudflare"
-    elif grep -qia 'AkamaiGHost' "$LASTH"; then
+    elif classify_matches -qia 'AkamaiGHost' "$LASTH"; then
         blocker="Akamai edge"
-    elif grep -qiaE '^x-sucuri-(id|cache):' "$LASTH"; then
+    elif classify_matches -qiaE '^x-sucuri-(id|cache):' "$LASTH"; then
         blocker="Sucuri WAF"
-    elif grep -qia '^x-iinfo:' "$LASTH" || grep -qia 'incap_ses' "$LASTH"; then
+    elif classify_matches -qia '^x-iinfo:' "$LASTH" || classify_matches -qia 'incap_ses' "$LASTH"; then
         blocker="Imperva/Incapsula WAF"
     fi
+    (( ! ${probe_local_failure:-0} ))
 }
 
 # Classify the last probe into a verdict + human detail.
@@ -68,7 +97,7 @@ classify() {
             return ;;
     esac
 
-    blocker_id
+    blocker_id || { probe_local_failure=1; return 70; }
     case $probe_code in
         200)
             if [[ "$probe_final" == *"/cdn-cgi/"* || "$blocker" == *challenge* ]]; then
