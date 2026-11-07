@@ -1,5 +1,6 @@
 # Decision logic shared by the scanner and its offline regression tests.
-# Callers provide probe_* globals and BODY/LASTH fixture paths.
+# Callers provide probe_* globals and BODY/LASTH response paths; the offline
+# suites supply fixtures through the same interface.
 
 # grep's exit 1 means no match; any other failure makes classification
 # unavailable. Keep this flag in the caller shell rather than in a pipeline or
@@ -26,6 +27,8 @@ blocker_id() {
     # Shell extraction avoids pipelines that could hide a utility failure.
     local -a cf_matches=("${(@f)cf_err}")
     cf_err=${cf_matches[1]#'error code: '}
+    # Prefer specific challenge/error evidence over a generic provider marker:
+    # provider identity alone must not turn an ordinary HTTP 200 into a challenge.
     if classify_matches -qia '^cf-mitigated:.*challenge' "$LASTH"; then
         blocker="Cloudflare challenge (cf-mitigated)"
     elif [[ -n "$cf_err" ]]; then
