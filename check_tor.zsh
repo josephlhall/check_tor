@@ -341,6 +341,8 @@ probe() {
     # A hostile Location may contain tabs even when curl stops at the limit.
     # Frame its native next URL separately, with a suffix that also prevents
     # command substitution from stripping any trailing newlines in the value.
+    # Missing framing leaves next-destination evidence unavailable; do not
+    # recover a plausible-looking URL from an ambiguous diagnostic fragment.
     local metadata=$out next_marker=$'\nCHECK_TOR_NEXT_URL\n'
     if [[ $out == *$next_marker* && $out == *$'\nCHECK_TOR_NEXT_END' ]]; then
         metadata=${out%%$next_marker*}
