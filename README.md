@@ -190,9 +190,11 @@ Explicit scheduling options make direct probes bypass ambient proxies.
 ```
 
 The records identify which requests belong together and include timings,
-redirect evidence, and a terminal run state. You can change pair order, let
-different hostnames overlap, and pace the start of probes. Direct requests
-can reveal your ordinary connection to target sites. Repeated trials can
+redirect evidence, and a terminal run state. They also retain bounded
+`Onion-Location` and onion `Alt-Svc` evidence from the final response on each
+route. The scanner does not contact an advertised service. You can change
+pair order, let different hostnames overlap, and pace the start of probes.
+Direct requests can reveal your ordinary connection to target sites. Repeated trials can
 share a Tor exit and other conditions, so treat them as repeated observations
 rather than independent samples.
 
@@ -269,8 +271,9 @@ open loopback connections. No Tor process or Internet access is needed.
 ```
 
 The Zsh tests cover verdicts and the ordinary CLI. The Python tests cover
-detailed measurements, transport and redirect behavior, `Retry-After`
-evidence, and real curl certificate validation against a local HTTPS server.
+detailed measurements, transport and redirect behavior, `Retry-After` and
+onion advertisement evidence, and real curl certificate validation against a
+local HTTPS server.
 The TLS tests cover a trusted certificate, an untrusted issuer, and a hostname
 mismatch. They use disposable trust settings without changing the machine’s
 trust store. Other transport tests use local files and fake curl for several

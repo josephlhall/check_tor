@@ -1,4 +1,4 @@
-"""Bounded, private-header Retry-After evidence for completed observations.
+"""Bounded terminal response association and private-header Retry-After evidence.
 
 This module only describes a response; it never sleeps, schedules, or changes
 native verdicts. No raw header, URL, or exception text is retained in evidence.
@@ -66,7 +66,9 @@ def _request_url(value, base=None):
             or re.search(r"\?(?:#|$)", value)
             or "//" in reference.path
             or "//" in urllib.parse.urlsplit(base).path
-            or (reference.scheme and not value.startswith(("http://", "https://")))
+            or (reference.scheme and (
+                not reference.netloc or not value.startswith(("http://", "https://"))
+            ))
         ):
             return None
         parsed = urllib.parse.urlsplit(urllib.parse.urljoin(base, value) if base else value)
@@ -165,6 +167,89 @@ def _value(value, ended_at):
     )
 
 
+def terminal_response_fields(directory, initial_url, result, wanted):
+    """Associate allowlisted fields with curl's final visited response.
+
+    Require a complete, unambiguous header sequence that agrees with curl's
+    status, redirect count and effective URL. Keep private values in memory
+    only long enough to resolve Location and extract the requested fields.
+    """
+    count = result.get("redirect_count")
+    if type(count) is not int or not 0 <= count <= BOUNDS["redirects"]:
+        return None, dict(state="unavailable", reason="native_redirect_count")
+    actual = _request_url(result.get("final_url"))
+    current = _request_url(initial_url)
+    if actual is None or current is None:
+        return None, dict(state="unavailable", reason="native_url_unavailable")
+    try:
+        with (directory / "headers").open("rb") as source:
+            raw = source.read(BOUNDS["header_bytes"] + 1)
+    except OSError:
+        return None, dict(state="unavailable", reason="headers_unavailable")
+    if len(raw) > BOUNDS["header_bytes"]:
+        return None, dict(state="truncated", reason="header_bytes_limit")
+    if not raw:
+        return None, dict(state="unavailable", reason="headers_unavailable")
+    parts = re.split(rb"\r?\n\r?\n", raw)
+    if parts[-1]:
+        return None, dict(state="unavailable", reason="incomplete_final_block")
+    if len(parts) - 1 > BOUNDS["response_blocks"]:
+        return None, dict(state="truncated", reason="response_blocks_limit")
+    blocks = []
+    lines_seen = 0
+    for index, part in enumerate(parts[:-1]):
+        lines = part.split(b"\n")
+        lines = [line.removesuffix(b"\r") for line in lines]
+        lines_seen += len(lines)
+        if lines_seen > BOUNDS["header_lines"]:
+            return None, dict(state="truncated", reason="header_lines_limit")
+        status = re.fullmatch(rb"HTTP/(?:1\.[01]|2|3) +([0-9]{3})(?: +([^\r\n]*))?", lines[0])
+        if not status:
+            return None, dict(state="invalid", reason="malformed_response_block")
+        code = int(status[1])
+        connect = (
+            code == 200 and lines[0].startswith(b"HTTP/1.")
+            and (status[2] or b"").lower() == b"connection established"
+        )
+        if 100 <= code < 200 or connect:
+            # In particular, a reason phrase is not proof that a preceding
+            # 200 was the origin and a trailing 200 was the proxy.
+            if index == len(parts) - 2:
+                return None, dict(state="unavailable", reason="terminal_block_unavailable")
+            continue
+        # No permissive splitlines(): controls must never become separators.
+        if any(re.search(rb"[\x00-\x08\x0b-\x1f\x7f]", line) for line in lines[1:]):
+            return None, dict(state="invalid", reason="malformed_header_block")
+        fields = []
+        for line in lines[1:]:
+            if line.startswith((b" ", b"\t")) or b":" not in line:
+                return None, dict(state="invalid", reason="ambiguous_header_block")
+            name, value = line.split(b":", 1)
+            if not re.fullmatch(rb"[!#$%&'*+.^_`|~0-9A-Za-z-]+", name):
+                return None, dict(state="invalid", reason="malformed_header_block")
+            name = name.lower()
+            if name == b"location" or name in wanted:
+                fields.append((name, value.strip(b" \t")))
+        blocks.append((code, fields))
+    if len(blocks) != count + 1:
+        return None, dict(state="unavailable", reason="response_count_mismatch")
+    if blocks[-1][0] != result["http_status"]:
+        return None, dict(state="invalid", reason="final_status_mismatch")
+    for code, fields in blocks[:-1]:
+        locations = [value for name, value in fields if name == b"location"]
+        if not 300 <= code < 400 or len(locations) != 1:
+            return None, dict(state="invalid", reason="redirect_chain_ambiguous")
+        try:
+            current = _request_url(locations[0].decode("utf-8"), current)
+        except UnicodeError:
+            current = None
+        if current is None:
+            return None, dict(state="unavailable", reason="redirect_chain_unavailable")
+    if current != actual:
+        return None, dict(state="invalid", reason="final_url_mismatch")
+    return blocks[-1][1], None
+
+
 def retry_after_evidence(directory, initial_url, result, ended_at):
     """Describe only a complete final visited 429/503 response header block.
 
@@ -176,70 +261,10 @@ def retry_after_evidence(directory, initial_url, result, ended_at):
     """
     if result.get("http_status") not in (429, 503):
         return dict(state="not_applicable", reason="http_status")
-    count = result.get("redirect_count")
-    if type(count) is not int or not 0 <= count <= BOUNDS["redirects"]:
-        return dict(state="unavailable", reason="native_redirect_count")
-    actual = _request_url(result.get("final_url"))
-    current = _request_url(initial_url)
-    if actual is None or current is None:
-        return dict(state="unavailable", reason="native_url_unavailable")
-    try:
-        with (directory / "headers").open("rb") as source:
-            raw = source.read(BOUNDS["header_bytes"] + 1)
-    except OSError:
-        return dict(state="unavailable", reason="headers_unavailable")
-    if len(raw) > BOUNDS["header_bytes"]:
-        return dict(state="truncated", reason="header_bytes_limit")
-    if not raw:
-        return dict(state="unavailable", reason="headers_unavailable")
-    parts = re.split(rb"\r?\n\r?\n", raw)
-    if parts[-1]:
-        return dict(state="unavailable", reason="incomplete_final_block")
-    if len(parts) - 1 > BOUNDS["response_blocks"]:
-        return dict(state="truncated", reason="response_blocks_limit")
-    blocks = []
-    lines_seen = 0
-    for part in parts[:-1]:
-        lines = part.split(b"\n")
-        lines = [line.removesuffix(b"\r") for line in lines]
-        lines_seen += len(lines)
-        if lines_seen > BOUNDS["header_lines"]:
-            return dict(state="truncated", reason="header_lines_limit")
-        status = re.fullmatch(rb"HTTP/(?:1\.[01]|2|3) +([0-9]{3})(?: +([^\r\n]*))?", lines[0])
-        if not status:
-            return dict(state="invalid", reason="malformed_response_block")
-        code = int(status[1])
-        if 100 <= code < 200 or (status[2] or b"").lower() == b"connection established":
-            continue
-        # No permissive splitlines(): controls must never become separators.
-        if any(re.search(rb"[\x00-\x08\x0b-\x1f\x7f]", line) for line in lines[1:]):
-            return dict(state="invalid", reason="malformed_header_block")
-        fields = []
-        for line in lines[1:]:
-            if line.startswith((b" ", b"\t")) or b":" not in line:
-                return dict(state="invalid", reason="ambiguous_header_block")
-            name, value = line.split(b":", 1)
-            if not re.fullmatch(rb"[!#$%&'*+.^_`|~0-9A-Za-z-]+", name):
-                return dict(state="invalid", reason="malformed_header_block")
-            fields.append((name.lower(), value.strip(b" \t")))
-        blocks.append((code, fields))
-    if len(blocks) != count + 1:
-        return dict(state="unavailable", reason="response_count_mismatch")
-    if blocks[-1][0] != result["http_status"]:
-        return dict(state="invalid", reason="final_status_mismatch")
-    for code, fields in blocks[:-1]:
-        locations = [value for name, value in fields if name == b"location"]
-        if not 300 <= code < 400 or len(locations) != 1:
-            return dict(state="invalid", reason="redirect_chain_ambiguous")
-        try:
-            current = _request_url(locations[0].decode("utf-8"), current)
-        except UnicodeError:
-            current = None
-        if current is None:
-            return dict(state="unavailable", reason="redirect_chain_unavailable")
-    if current != actual:
-        return dict(state="invalid", reason="final_url_mismatch")
-    values = [value for name, value in blocks[-1][1] if name == b"retry-after"]
+    fields, problem = terminal_response_fields(directory, initial_url, result, {b"retry-after"})
+    if problem:
+        return problem
+    values = [value for name, value in fields if name == b"retry-after"]
     if not values:
         return dict(state="absent", reason="field_absent")
     if len(values) != 1:

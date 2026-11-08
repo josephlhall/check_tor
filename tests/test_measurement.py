@@ -993,6 +993,7 @@ class MeasurementTests(unittest.TestCase):
             "check_tor_measure.py",
             "check_tor_probe.zsh",
             "check_tor_retry.py",
+            "check_tor_onion.py",
         ):
             shutil.copy2(ROOT / filename, copy / filename)
         (copy / "check_tor_probe.zsh").write_text(
@@ -1517,6 +1518,59 @@ class MeasurementTests(unittest.TestCase):
                 self.assertTrue(self.assert_accounting(rows)["schedule_complete"])
                 self.assertEqual(len(self.calls()), 3)
 
+    def test_after_pair_partner_carries_passive_onion_evidence(self):
+        host = OnionEvidenceTests.host
+        for with_advertisements in (False, True):
+            with self.subTest(with_advertisements=with_advertisements):
+                self.clear_logs()
+                extra = (f"Onion-Location: http://{host}/synthetic-private-path\r\n"
+                         f'Alt-Svc: h2="{host}:443"\r\n') if with_advertisements else ""
+                status, rows, error = self.run_scan(
+                    "--execution-policy", "paired-cautious", "--rate-limit-stop", "after-pair",
+                    "--trials", 1, "--control", "always", "--control-scope", "trial",
+                    plan={
+                        "https://alpha.example.test|tor": [{"code": 429, "headers": "Retry-After: 60\r\n" + extra}],
+                        "https://alpha.example.test|direct": [{"code": 429, "headers": "Retry-After: 120\r\n" + extra}],
+                    },
+                )
+                self.assertEqual(status, 0, error)
+                ends = self.select(rows, "attempt_end", "target")
+                self.assertEqual([r["route"] for r in ends], ["tor", "direct"])
+                self.assertEqual([r["verdict"] for r in ends], ["RATELIMIT", "RATELIMIT"])
+                self.assertEqual([r["retry_after"]["wait_seconds"] for r in ends], [60, 120])
+                self.assertEqual(ends[1]["rate_limit_trigger_attempt_id"], ends[0]["attempt_id"])
+                self.assertEqual(self.select(rows, "pair_end")[0]["state"], "complete")
+                for record in ends:
+                    evidence = record["onion_advertisements"]
+                    self.assertEqual(evidence["source"], {"https": True, "onion_hostname": False})
+                    state = "available" if with_advertisements else "absent"
+                    self.assertEqual(evidence["onion_location"]["state"], state)
+                    self.assertEqual(evidence["alt_svc"]["state"], state)
+                self.assertNotIn("synthetic-private-path", json.dumps(rows))
+                self.assertNotIn("onion_advertisements", self.select(rows, "attempt_end", "preflight")[0])
+                self.assertEqual(rows[0]["settings"]["onion_advertisement_bounds"]["evidence_bytes"], 4096)
+                calls = self.calls()
+                self.assertEqual([r["url"] for r in calls], [PREFLIGHT, "https://alpha.example.test", "https://alpha.example.test"])
+                self.assertTrue(all("--alt-svc" not in r["args"] for r in calls))
+                self.assert_accounting(rows)
+
+    def test_onion_evidence_capture_loss_keeps_completed_verdict(self):
+        status, rows, error = self.run_scan(
+            "--trials", 1, "--control", "always", "--control-scope", "trial",
+            plan={
+                "https://alpha.example.test|tor": [{"headers": "Alt-Svc: incomplete", "code": 200}],
+                "https://alpha.example.test|direct": [{"omit_writeout": True}],
+            },
+        )
+        self.assertEqual(status, 0, error)
+        tor, direct = self.select(rows, "attempt_end", "target")
+        self.assertEqual(tor["verdict"], "PASS")
+        self.assertTrue(tor["complete"])
+        for attempt, reason in ((tor, "incomplete_final_block"), (direct, "native_status_unavailable")):
+            self.assertEqual(attempt["onion_advertisements"]["alt_svc"], {"state": "unavailable", "reason": reason})
+        self.assertEqual(len(self.calls()), 3)
+        self.assert_accounting(rows)
+
     def test_after_pair_fatal_before_or_during_permitted_partner(self):
         spec = importlib.util.spec_from_file_location("after_pair_subject", ROOT / "check_tor_measure.py")
         coordinator = importlib.util.module_from_spec(spec)
@@ -1948,6 +2002,142 @@ class MeasurementTests(unittest.TestCase):
             )
         self.assert_no_owned_children()
         self.assert_clean()
+
+
+class OnionEvidenceTests(unittest.TestCase):
+    url = "https://alpha.example.test/"
+    host = "a" * 56 + ".onion"
+    other_host = "b" * 56 + ".onion"
+
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory(prefix="check-tor-onion-tests-")
+        self.addCleanup(directory.cleanup)
+        self.directory = Path(directory.name)
+
+    def evidence(self, headers, *, source=None, raw=None, **native):
+        from check_tor_onion import onion_advertisement_evidence
+
+        path = self.directory / "headers"
+        if headers is None and raw is None:
+            path.unlink(missing_ok=True)
+        else:
+            path.write_bytes(raw if raw is not None else b"HTTP/2 200\r\n" + headers + b"\r\n")
+        initial = source or self.url
+        result = dict(http_status=200, redirect_count=0, final_url=initial)
+        result.update(native)
+        return onion_advertisement_evidence(self.directory, initial, result)
+
+    def test_onion_origin_redaction_and_source_context(self):
+        for source, https, onion in (
+            (self.url, True, False), ("http://alpha.example.test/", False, False),
+            ("https://" + self.host.upper() + "./", True, True),
+        ):
+            with self.subTest(source=source):
+                headers = (
+                    "oNiOn-LoCaTiOn: HTTP://sentinel-user:sentinel-pass@"
+                    + self.host.upper()
+                    + ".:00080/sentinel-path?sentinel-query#sentinel-fragment\r\n"
+                    + "Set-Cookie: sentinel-cookie\r\n"
+                )
+                evidence = self.evidence(headers.encode(), source=source)
+                self.assertEqual(evidence["source"], {"https": https, "onion_hostname": onion})
+                self.assertEqual(evidence["onion_location"], {
+                    "state": "available", "origin": "http://" + self.host + ":80",
+                    "omitted_components": ["userinfo", "path", "query", "fragment"],
+                })
+                self.assertEqual(evidence["alt_svc"], {"state": "absent", "reason": "field_absent"})
+                self.assertNotIn("sentinel-", json.dumps(evidence))
+
+    def test_duplicate_conflicting_and_invalid_onion_location(self):
+        location = ("https://sub." + self.host).encode()
+        for second in (location, ("http://" + self.other_host).encode()):
+            evidence = self.evidence(b"Onion-Location: " + location + b"\r\nOnion-Location: " + second + b"\r\n")
+            self.assertEqual(evidence["onion_location"], {"state": "invalid", "reason": "duplicate_fields"})
+        for value in (
+            b"", b"//" + self.host.encode(), b"ftp://" + self.host.encode(), b"https://short.onion/",
+            location + b":0", location + b":65536", location + b"@example.test",
+            location + b"/p%xy", location + b"/p\tq", location + b"/bad#first#second",
+            location + b"/\xff",
+        ):
+            with self.subTest(value=value):
+                evidence = self.evidence(b"Onion-Location: " + value + b"\r\n")
+                self.assertEqual(evidence["onion_location"], {"state": "invalid", "reason": "invalid_onion_url"})
+                self.assertEqual(evidence["alt_svc"]["state"], "absent")
+
+    def test_alt_svc_list_order_deduplication_and_allowlist(self):
+        headers = (
+            f'aLt-SvC: h3="other.example.test:443", h2="{self.host.upper()}.:00443";'
+            f' note="sentinel-quoted, h2=not-an-entry", h2=":8443"\r\n'
+            f'Alt-Svc: h2="{self.host}:443", h2="{self.other_host}:8443", '
+            f'h%2F="{self.host}:444"\r\n'
+        )
+        evidence = self.evidence(headers.encode())
+        self.assertEqual(evidence["alt_svc"], {"state": "available", "entries": [
+            {"protocol": "h2", "authority": self.host + ":443"},
+            {"protocol": "h2", "authority": self.other_host + ":8443"},
+            {"protocol": "h%2F", "authority": self.host + ":444"},
+        ]})
+        self.assertNotIn("sentinel-", json.dumps(evidence))
+        for raw, reason in ((b"clear", "clear"), (b'h2=":443", h3="[::1]:443"', "no_onion_authority")):
+            evidence = self.evidence(b"Alt-Svc: " + raw + b"\r\n")
+            self.assertEqual(evidence["alt_svc"], {"state": "absent", "reason": reason})
+        for raw in (
+            f'clear, h2="{self.host}:443"', 'h2="short.onion:443"',
+            f'h2="{self.host}:0"', f'h2="{self.host}:65536"', f'h2="{self.host}:443/path"',
+            f'h2="sentinel-user@{self.host}:443"', f'h2={self.host}:443',
+            f'h2="{self.host}:443"; note="unterminated', f'%68="{self.host}:443"',
+            f'h%2f="{self.host}:443"', f'h2="{self.host}:443", ',
+        ):
+            with self.subTest(raw=raw):
+                evidence = self.evidence(("Alt-Svc: " + raw + "\r\n").encode())
+                self.assertEqual(evidence["alt_svc"]["state"], "invalid")
+                self.assertNotIn("entries", evidence["alt_svc"])
+                self.assertEqual(evidence["onion_location"]["state"], "absent")
+
+    def test_capture_and_field_bounds(self):
+        from check_tor_onion import BOUNDS
+
+        for raw, native, expected in (
+            (None, {}, ("unavailable", "headers_unavailable")),
+            (b"HTTP/2 200\r\nAlt-Svc:", {}, ("unavailable", "incomplete_final_block")),
+            (b"HTTP/2 200\r\n\r\n", {"http_status": None}, ("unavailable", "native_status_unavailable")),
+            (b"HTTP/2 200\r\n\r\n", {"http_status": 302}, ("invalid", "final_status_mismatch")),
+            (b"HTTP/2 200\r\n\r\n", {"final_url": self.url + "wrong"}, ("invalid", "final_url_mismatch")),
+            (b"HTTP/2 200\r\n\r\nHTTP/2 200\r\n\r\n", {}, ("unavailable", "response_count_mismatch")),
+            (b"HTTP/1.1 200 OK\r\n\r\nHTTP/1.1 200 Connection established\r\n\r\n",
+             {}, ("unavailable", "terminal_block_unavailable")),
+            (b"HTTP/2 200\r\nAlt-Svc: a\r\n folded\r\n\r\n", {}, ("invalid", "ambiguous_header_block")),
+            (b"x" * (BOUNDS["header_bytes"] + 1), {}, ("truncated", "header_bytes_limit")),
+            (b"HTTP/2 103\r\n\r\n" * BOUNDS["response_blocks"] + b"HTTP/2 200\r\n\r\n",
+             {}, ("truncated", "response_blocks_limit")),
+            (b"HTTP/2 200\r\n" + b"X: y\r\n" * BOUNDS["header_lines"] + b"\r\n",
+             {}, ("truncated", "header_lines_limit")),
+        ):
+            with self.subTest(expected=expected):
+                evidence = self.evidence(None, raw=raw, **native)
+                self.assertIsNone(evidence["source"])
+                self.assertEqual(evidence["onion_location"], dict(zip(("state", "reason"), expected)))
+                self.assertEqual(evidence["alt_svc"], evidence["onion_location"])
+
+        for headers, reason in (
+            (b"Alt-Svc: clear\r\n" * (BOUNDS["fields_per_type"] + 1), "fields_per_type_limit"),
+            (b"Alt-Svc: " + b"x" * (BOUNDS["value_bytes"] + 1) + b"\r\n", "value_bytes_limit"),
+            (b"Alt-Svc: " + b", ".join([b'h2=":443"'] * (BOUNDS["alt_entries"] + 1)) + b"\r\n", "alt_entries_limit"),
+            (b"Alt-Svc: " + b"x" * (BOUNDS["protocol_bytes"] + 1) + b'=":443"\r\n', "protocol_bytes_limit"),
+        ):
+            with self.subTest(reason=reason):
+                evidence = self.evidence(headers)
+                self.assertEqual(evidence["alt_svc"], {"state": "truncated", "reason": reason})
+                self.assertEqual(evidence["onion_location"]["state"], "absent")
+
+        longest_host = ("c" * 63 + ".") * 3 + self.host
+        self.assertEqual(len(longest_host), 254)
+        longest_host = longest_host[1:]
+        protocol = "x" * BOUNDS["protocol_bytes"]
+        values = ", ".join(f'{protocol}="{longest_host}:{65535 - n}"' for n in range(BOUNDS["alt_entries"]))
+        evidence = self.evidence((f"Alt-Svc: {values}\r\nOnion-Location: https://{longest_host}\r\n").encode())
+        self.assertEqual(len(evidence["alt_svc"]["entries"]), BOUNDS["alt_entries"])
+        self.assertLessEqual(len(json.dumps(evidence, ensure_ascii=True).encode()), BOUNDS["evidence_bytes"])
 
 
 if __name__ == "__main__":

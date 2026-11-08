@@ -24,6 +24,7 @@ import urllib.parse
 import uuid
 from pathlib import Path
 
+from check_tor_onion import BOUNDS as ONION_ADVERTISEMENT_BOUNDS, onion_advertisement_evidence
 from check_tor_retry import BOUNDS as RETRY_AFTER_BOUNDS, retry_after_evidence
 
 SCHEMA = 2
@@ -637,6 +638,7 @@ class Engine:
             "fixed" if self.args.trials is not None else "failure-retry"
         )
         settings["retry_after_bounds"] = dict(RETRY_AFTER_BOUNDS)
+        settings["onion_advertisement_bounds"] = dict(ONION_ADVERTISEMENT_BOUNDS)
         settings["redirect_evidence_bounds"] = dict(
             header_bytes=MAX_REDIRECT_HEADER_BYTES,
             hops=MAX_REDIRECT_HOPS,
@@ -655,6 +657,7 @@ class Engine:
             "check_tor_probe.zsh",
             "check_tor_measure.py",
             "check_tor_retry.py",
+            "check_tor_onion.py",
         ):
             digest.update(
                 filename.encode() + b"\0" + (self.root / filename).read_bytes() + b"\0"
@@ -841,6 +844,9 @@ class Engine:
                 body_limited=None,
                 tor_verified=None,
                 local_error=None,
+                **(dict(onion_advertisements=onion_advertisement_evidence(
+                    request_dir, fields["url"], None
+                )) if not preflight else {}),
             )
             raise Failure("local adapter execution failed")
         self.counts[phase]["issued"] += 1
@@ -1035,6 +1041,10 @@ class Engine:
                 body_limited=None,
                 tor_verified=None,
                 local_error=None,
+            )
+        if fields["phase"] == "target":
+            result["onion_advertisements"] = onion_advertisement_evidence(
+                task["directory"], fields["url"], result
             )
         duration = time.monotonic() - task["started"]
         end = dict(

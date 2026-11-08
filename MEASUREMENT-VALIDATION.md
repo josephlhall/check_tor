@@ -178,6 +178,16 @@ The existing text and JSONL v1 interfaces and default stopping rules remain
 available. Neither the new format nor its scheduling options amend frozen
 `TACP-0.2` or retroactively add evidence to the completed pilot.
 
+Detailed target observations can retain `Onion-Location` origins and onion
+`Alt-Svc` transport advertisements from the final response on either route.
+Use the source flags and evidence states to distinguish the two mechanisms
+and separate absent evidence from failed or ambiguous capture. These fields
+describe what a server advertised during the observed request. They cannot
+establish how Tor Browser would handle the advertisement or whether the
+advertised service works. The scanner does not follow advertisements or
+inspect HTML for onion discovery. Older records without the evidence field
+did not collect it.
+
 Fixed trials retain successful as well as unsuccessful observations. They do
 not make repeated requests statistically independent. Paired paths are
 sequential, their start-to-start gap is recorded, and late or missing partners
