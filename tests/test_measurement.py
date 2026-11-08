@@ -1575,7 +1575,7 @@ class MeasurementTests(unittest.TestCase):
         spec = importlib.util.spec_from_file_location("after_pair_subject", ROOT / "check_tor_measure.py")
         coordinator = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(coordinator)
-        for fault in ("signal_before", "signal_during", "local_during", "launch", "output", "scratch", "cleanup"):
+        for fault in ("signal_before", "signal_during", "signal_and_local", "signal_and_setup", "signal_accounting", "signal_target_states", "local_during", "launch", "output", "scratch", "cleanup"):
             with self.subTest(fault=fault):
                 self.clear_logs()
                 coordinator.CANCELLED = 0
@@ -1608,13 +1608,44 @@ class MeasurementTests(unittest.TestCase):
                 with mock.patch.object(coordinator, "Writer", CaptureWriter):
                     engine = coordinator.Engine(coordinator.arguments(options), coordinator.load_targets(self.input))
                 plan = {"https://alpha.example.test|tor": [{"code": 429}],
-                        "https://alpha.example.test|direct": [{"delay": 10 if fault == "signal_during" else 0}]}
+                        "https://alpha.example.test|direct": [{
+                            "delay": 10 if fault == "signal_during" else 0,
+                            "exit": 23 if fault == "signal_and_local" else 0,
+                        }]}
                 engine.env.update(self.environment, MEASUREMENT_TEST_PLAN=json.dumps(plan))
                 original_popen = subprocess.Popen
                 original_result = engine.result
                 original_cleanup = engine.cleanup
                 original_rmtree = shutil.rmtree
                 original_read_ready = engine.read_ready
+                original_finish = engine.finish
+                original_accounting = engine.schedule_accounting
+                original_public_target = coordinator.public_target
+                accounting_finished = False
+
+                def public_target(target):
+                    value = original_public_target(target)
+                    if fault == "signal_target_states" and accounting_finished:
+                        coordinator.CANCELLED = signal.SIGTERM
+                    return value
+
+                def accounting():
+                    nonlocal accounting_finished
+                    result = original_accounting()
+                    accounting_finished = True
+                    if fault == "signal_accounting":
+                        coordinator.CANCELLED = signal.SIGTERM
+                    return result
+
+                def finish(task, abort=False):
+                    if fault in ("signal_and_local", "signal_and_setup") and task["fields"]["route"] == "direct":
+                        # The adapter has already produced its local I/O error.
+                        # Cancellation just before consumption must preserve it.
+                        self.assertEqual(task["process"].returncode, 70 if fault == "signal_and_setup" else 0)
+                        self.assertTrue(task["eof"])
+                        coordinator.CANCELLED = signal.SIGTERM
+                        abort = True
+                    return original_finish(task, abort=abort)
 
                 def read_ready(*args):
                     progressed = original_read_ready(*args)
@@ -1629,6 +1660,8 @@ class MeasurementTests(unittest.TestCase):
                     return original_rmtree(path, *args, **kwargs)
 
                 def popen(command, **kwargs):
+                    if fault == "signal_and_setup" and command[3:4] == ["direct"]:
+                        (Path(command[2]) / "body").mkdir()
                     if fault == "launch" and command[1].endswith("check_tor_probe.zsh") and command[3:4] == ["direct"]:
                         raise OSError("synthetic partner launch failure")
                     return original_popen(command, **kwargs)
@@ -1648,9 +1681,13 @@ class MeasurementTests(unittest.TestCase):
                      mock.patch.object(engine, "result", result), \
                      mock.patch.object(coordinator.shutil, "rmtree", rmtree), \
                      mock.patch.object(engine, "read_ready", read_ready), \
+                     mock.patch.object(engine, "finish", finish), \
+                     mock.patch.object(engine, "schedule_accounting", accounting), \
+                     mock.patch.object(coordinator, "public_target", public_target), \
                      mock.patch.object(engine, "cleanup", cleanup):
                     code = engine.run()
-                interrupted = fault.startswith("signal_")
+                interrupted = fault in ("signal_before", "signal_during", "signal_accounting", "signal_target_states")
+                partner_complete = fault in ("cleanup", "signal_accounting", "signal_target_states")
                 self.assertEqual(code, 143 if interrupted else 1)
                 if fault == "output":
                     self.assertEqual(self.select(records, "run_end"), [])
@@ -1660,9 +1697,9 @@ class MeasurementTests(unittest.TestCase):
                 end = records[-1]
                 self.assertEqual(end["state"], "interrupted" if interrupted else "error")
                 self.assertEqual(end["omission_counts"]["known_required"], 2)
-                self.assertEqual(end["schedule_accounting"]["known_required_unresolved"], int(fault != "cleanup"))
+                self.assertEqual(end["schedule_accounting"]["known_required_unresolved"], int(not partner_complete))
                 pair = self.select(records, "pair_end")[0]
-                self.assertEqual(pair["missing_routes"], [] if fault == "cleanup" else ["direct"])
+                self.assertEqual(pair["missing_routes"], [] if partner_complete else ["direct"])
                 self.assertNotIn("missing_reason", pair)
                 self.assertEqual(pair["aborted_routes"], ["direct"] if fault == "signal_during" else [])
                 target_ends = self.select(records, "attempt_end", "target")
@@ -1672,7 +1709,12 @@ class MeasurementTests(unittest.TestCase):
                 else:
                     self.assertEqual(len(target_ends), 2)
                     self.assertEqual(target_ends[-1]["adapter_started"], fault != "launch")
-                    self.assertEqual(target_ends[-1]["complete"], fault == "cleanup")
+                    self.assertEqual(target_ends[-1]["complete"], partner_complete)
+                    if fault in ("signal_and_local", "signal_and_setup"):
+                        self.assertEqual(target_ends[-1]["status"], "error")
+                        self.assertIsNotNone(end["error"])
+                    if fault == "signal_and_local":
+                        self.assertEqual(target_ends[-1]["local_error"], "local_curl_setup_or_io_failed")
                     self.assertEqual(target_ends[-1][permission_key], target_ends[0]["attempt_id"])
                 if fault != "launch":
                     self.assert_accounting(records)
@@ -2093,6 +2135,32 @@ class OnionEvidenceTests(unittest.TestCase):
                 self.assertEqual(evidence["alt_svc"]["state"], "invalid")
                 self.assertNotIn("entries", evidence["alt_svc"])
                 self.assertEqual(evidence["onion_location"]["state"], "absent")
+
+    def test_alt_svc_opaque_quoted_parameters_are_discarded(self):
+        for parameter in (b"\xff", b"\\\xff", b"synthetic-private\x80"):
+            with self.subTest(parameter=parameter):
+                header = b'Alt-Svc: h2="' + self.host.encode() + b':443"; note="' + parameter + b'"\r\n'
+                evidence = self.evidence(header)
+                self.assertEqual(evidence["alt_svc"], {"state": "available", "entries": [
+                    {"protocol": "h2", "authority": self.host + ":443"},
+                ]})
+                self.assertNotIn("synthetic-private", json.dumps(evidence))
+                self.assertNotIn("\\u00", json.dumps(evidence))
+        for header in (b'Alt-Svc: h\xff=":443"\r\n', b'Alt-Svc: h2="\xff:443"\r\n',
+                       b'Alt-Svc: h2=":443"; note=\xff\r\n'):
+            self.assertEqual(self.evidence(header)["alt_svc"]["state"], "invalid")
+
+    def test_resolved_intermediate_url_is_bounded(self):
+        raw = b"".join(
+            b"HTTP/1.1 302 Found\r\nLocation: " + location + b"\r\n\r\n"
+            for location in (b"/" + b"a" * 4500 + b"/", b"b" * 4500 + b"/", b"/end")
+        )
+        raw += b"HTTP/1.1 200 OK\r\nOnion-Location: http://" + self.host.encode() + b"\r\n\r\n"
+        evidence = self.evidence(None, raw=raw, redirect_count=3, final_url=self.url + "end")
+        self.assertIsNone(evidence["source"])
+        self.assertEqual(evidence["onion_location"], {
+            "state": "unavailable", "reason": "redirect_chain_unavailable",
+        })
 
     def test_capture_and_field_bounds(self):
         from check_tor_onion import BOUNDS

@@ -20,7 +20,7 @@ DNS_NAME = re.compile(r"(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*"
 V3_ONION = re.compile(r"(?:^|\.)[a-z2-7]{56}\.onion$")
 TOKEN = r"[!#$%&'*+.^_\x60|~0-9A-Za-z-]"
 PERCENT_ESCAPE = re.compile(r"%([0-9A-F]{2})")
-QUOTED_PARAMETER = r'"(?:[^"\\]|\\[\t -~])*"'
+QUOTED_PARAMETER = r'"(?:[^"\\]|\\[\t -~\x80-\xff])*"'
 ALT_MEMBER = re.compile(
     rf'[ \t]*({TOKEN}+)="([^"\\]*)"'
     rf'(?:[ \t]*;[ \t]*{TOKEN}+=(?:{TOKEN}+|{QUOTED_PARAMETER}))*'
@@ -81,10 +81,9 @@ def _onion_location(values):
 
 
 def _alt_svc(values):
-    try:
-        text = b",".join(values).decode("ascii")
-    except UnicodeError:
-        return _status("invalid", "invalid_alt_svc")
+    # Preserve opaque bytes in quoted extension parameters, which are
+    # discarded. The protocol and authority grammars still require ASCII.
+    text = b",".join(values).decode("latin-1")
     if text == "clear":
         return _status("absent", "clear")
     entries = []

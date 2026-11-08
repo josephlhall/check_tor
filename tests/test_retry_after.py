@@ -169,6 +169,17 @@ class RetryAfterTests(unittest.TestCase):
         evidence = self.evidence(headers=prefix + final)  # native says no follow
         self.assert_reason(evidence, "unavailable", "response_count_mismatch")
 
+    def test_resolved_url_bound_applies_before_a_later_short_redirect(self):
+        raw = b"".join(
+            b"HTTP/1.1 302 Found\r\nLocation: " + location + b"\r\n\r\n"
+            for location in (b"/" + b"a" * 4500 + b"/", b"b" * 4500 + b"/", b"/end")
+        )
+        raw += b"HTTP/1.1 429 Too Many Requests\r\nRetry-After: 30\r\n\r\n"
+        self.assert_reason(
+            self.evidence(headers=raw, redirect_count=3, final_url=A + "end"),
+            "unavailable", "redirect_chain_unavailable",
+        )
+
     def test_duplicate_conflicting_folded_and_hostile_fields(self):
         for value in (b"60", b"70"):
             raw = b"HTTP/2 429\r\nRetry-After: 60\r\nrEtRy-AfTeR: " + value + b"\r\n\r\n"

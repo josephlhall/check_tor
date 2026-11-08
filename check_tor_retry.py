@@ -82,7 +82,14 @@ def _request_url(value, base=None):
             host = "[" + host + "]"
         if port is not None:
             host += ":" + str(port)
-        return urllib.parse.urlunsplit((parsed.scheme.lower(), host, parsed.path or "/", parsed.query, ""))
+        normalized = urllib.parse.urlunsplit(
+            (parsed.scheme.lower(), host, parsed.path or "/", parsed.query, "")
+        )
+        # Individually short relative references can accumulate into a long
+        # URL. Enforce the bound at every hop before a later redirect resets it.
+        if len(normalized.encode("utf-8")) > BOUNDS["url_bytes"]:
+            return None
+        return normalized
     except (ValueError, UnicodeError):
         return None
 

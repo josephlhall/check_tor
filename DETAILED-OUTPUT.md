@@ -422,6 +422,8 @@ responses and recognizable HTTP/1.x CONNECT success blocks. A redirect at
 the follow limit can itself be the terminal response. Headers from earlier
 redirects and inferred or unvisited destinations cannot supply evidence.
 Unrecognized proxy blocks or ambiguous redirects can prevent association.
+Curl's appended HTTP trailers also cause this version to withhold evidence
+with `incomplete_final_block`, even when the initial headers were complete.
 A capture failure leaves the attempt's native verdict and completion intact.
 
 The parser matches header names case-insensitively. It accepts a single ASCII
@@ -431,7 +433,8 @@ accepts comma-separated alternatives across fields, with RFC 7838 ALPN tokens,
 quoted authorities, and syntactically checked parameters. Authority escapes,
 empty list members, and a mixture of `clear` and alternatives are rejected.
 Only explicit onion hosts are retained. Hostless alternatives and other hosts
-can be parsed but supply no onion authority. Parameter values are discarded.
+can be parsed but supply no onion authority. Quoted parameter values may
+contain opaque non-ASCII bytes. Parameter values are discarded.
 A malformed member invalidates the list rather than exposing a partial set.
 
 Both types require a 56-character base32 label immediately before `.onion`,

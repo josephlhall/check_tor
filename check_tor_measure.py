@@ -1001,16 +1001,19 @@ class Engine:
 
     def finish(self, task, abort=False):
         process, fields, bundle = task["process"], task["fields"], task["bundle"]
+        adapter_status = process.poll()
         result = (
             self.result(task, abort=abort)
-            if process.poll() is not None and task["eof"]
+            if adapter_status is not None and task["eof"]
             else None
         )
-        status = (
-            ("error" if result["local_error"] else "complete")
-            if result is not None
-            else ("aborted" if abort else "error")
-        )
+        status = "aborted" if abort else "error"
+        if result is not None:
+            status = "error" if result["local_error"] else "complete"
+        elif self.args.rate_limit_stop == "after-pair" and task["eof"] and adapter_status == 70:
+            # The bridge explicitly exits 70 on local setup failure before it
+            # can emit JSON. A simultaneous signal cannot erase that evidence.
+            status = "error"
         ended_at = utc()
         if result is not None and fields["phase"] == "target":
             result["stop_reason"] = (
@@ -1110,7 +1113,9 @@ class Engine:
                 shutil.rmtree(task["directory"])
             except OSError as exc:
                 raise Failure("local request cleanup failed") from exc
-        if status != "complete" and not abort:
+        if status == "error" and (
+            not abort or self.args.rate_limit_stop == "after-pair"
+        ):
             raise Failure("local adapter/setup failed")
 
     def apply_hostname_stop(self, bundle, end):
@@ -1484,6 +1489,14 @@ class Engine:
                         )
                         if state == "complete" and truncated:
                             state, code = "policy_stopped", 3
+                    target_states = [
+                        dict(public_target(t), state=self.states[t["target_id"]])
+                        for t in self.targets
+                    ]
+                    # Accounting and target summaries can be lengthy. Check
+                    # cancellation after both, before handing off the record.
+                    if CANCELLED and state != "error":
+                        state, code = "interrupted", 128 + CANCELLED
                     self.writer.emit(
                         "run_end",
                         ended_at=utc(),
@@ -1492,10 +1505,7 @@ class Engine:
                         complete=state == "complete",
                         exit_code=code,
                         counts=self.counts,
-                        target_states=[
-                            dict(public_target(t), state=self.states[t["target_id"]])
-                            for t in self.targets
-                        ],
+                        target_states=target_states,
                         verdict_counts={k: dict(v) for k, v in self.verdicts.items()},
                         error=self.error,
                         **coverage,
