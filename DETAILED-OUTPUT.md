@@ -52,6 +52,7 @@ preserving the configured TLS trust settings.
 | `--order counterbalanced --seed N` | Choose reproducible order independently of outcomes, circuit tags, and worker completion order. Requires always-controls. |
 | `--max-partner-gap S` | Mark a pair late if the start times of its two probes are more than S seconds apart. Accepts positive seconds up to 3600, default 60. Requires trial-scoped controls when set explicitly. |
 | `--execution-policy legacy\|paired-cautious` | Default `legacy`. `paired-cautious` prioritizes ready pair partners and stops an input hostname after explicit HTTP 429. |
+| `--rate-limit-stop immediate\|after-pair` | Requires `paired-cautious`. Default `immediate`. `after-pair` also requires fixed trials, `--control always`, and `--control-scope trial`. |
 | `--workers N` | At most N active target bundles, from 1 to 32; default 1. |
 | `--start-gap S` | Global minimum interval between coordinator probe invocations, in seconds, from 0 to 3600; default 0. |
 | `--run-id TEXT`, `--group-id TEXT` | Optional labels for your analysis. Join records by the scanner's generated execution ID. |
@@ -274,8 +275,21 @@ this to other hostnames or providers. HTTP 503, response body text, certificate
 failures, and timeouts do not trigger the stop. Unrelated hostnames continue.
 Missing or bad retry metadata cannot prevent a 429 stop.
 
-A completed 429 remains a complete native observation. A suppressed partner is
-missing, not aborted, and has no invented attempt ID. A shortened bundle stays
+With `--rate-limit-stop after-pair`, the stop still latches on the first 429.
+Only the unissued opposite route of its preplanned pair and input occurrence
+can start after that stop. If the partner already ran, no further request is
+permitted. The permitted partner retains ordinary priority, pacing, timeout,
+and redirect settings. Its own 429 remains a separate observation with its
+own `retry_after` and cannot grant another exception. This bounded measurement
+choice can start a partner before a received `Retry-After` interval elapses.
+HTTP does not guarantee that a request on another route is exempt.
+See [RFC 6585 §4](https://www.rfc-editor.org/rfc/rfc6585.html#section-4) and
+[RFC 9110 §10.2.3](https://www.rfc-editor.org/rfc/rfc9110.html#section-10.2.3).
+
+A pair is complete if both observations completed, including two HTTP 429s.
+A suppressed partner is missing and has no attempt ID. A permitted partner
+that fails to complete is unresolved. Its attempt or pair records and the
+terminal state identify whether it never started, failed, or was aborted. A shortened bundle stays
 `partial`; a suppressed occurrence that never starts stays `not_started`.
 
 The policy records bounded omission descriptions tied to the triggering
@@ -283,7 +297,9 @@ attempt. Known-required requests are distinguished from future controls/retry
 opportunities whose eligibility was never determined. Planned request counts
 remain upper bounds; subtracting issued requests does not count actual skipped
 requests. Three always-controlled pairs stopped on their first Tor request
-have one issued/completed request and five known-required omissions.
+have one issued/completed request and five known-required omissions under
+`immediate`. Under `after-pair`, a completed partner raises the
+issued/completed count to two and leaves four known-required omissions.
 
 | Invocation outcome | `state` | `complete` | Exit code |
 | --- | --- | --- | --- |
@@ -318,7 +334,9 @@ an earlier attempt succeeded. Failures and signals retain their significance.
 
 | Record | Additional fields |
 | --- | --- |
-| `hostname_stop` | Normalized `hostname`, `triggering_attempt_id`, `triggering_target_id`, `route`, `http_status`. Emitted even if nothing remains to omit. |
+| `run_start.settings` | `rate_limit_stop` is `"immediate"` or `"after-pair"` under `paired-cautious`, and `null` under `legacy`. Older records omit it and used immediate stopping under `paired-cautious`. |
+| `hostname_stop` | Normalized `hostname`, `triggering_attempt_id`, `triggering_target_id`, `route`, `http_status`. Emitted even if nothing remains to omit. In `after-pair`, also includes `triggering_pair_id` and nullable `permitted_partner_route` (`"tor"` or `"direct"` when eligible). |
+| `attempt_start` / `attempt_end` | Optional `rate_limit_trigger_attempt_id` identifies an attempted launch under that permission. Join with `hostname_stop` and `pair_end` within the execution. `adapter_started: false` indicates a failed launch. If no partner attempt was logged, use the missing pair and terminal record. |
 | `target_omission` | Target identity, stop reason/trigger fields, and compact `known_required` / `eligibility_undetermined` lists. |
 | `pair_end` | `missing_reason` identifies the hostname stop when it withheld a partner. |
 | `bundle_end` | Optional `omission` retains that target's stop and omission description. |

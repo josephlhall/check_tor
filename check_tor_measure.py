@@ -113,6 +113,7 @@ def arguments(argv):
         "--execution-policy", choices=["legacy", "paired-cautious"], default="legacy",
         help="prioritize ready partners and stop a hostname after HTTP 429",
     )
+    p.add_argument("--rate-limit-stop", choices=["immediate", "after-pair"])
     p.add_argument("--workers", type=bounded_int(32), default=1)
     p.add_argument("--start-gap", type=gap, default=0.0)
     p.add_argument("target_file")
@@ -140,6 +141,14 @@ def arguments(argv):
         p.error("--max-partner-gap must be positive")
     if "--max-partner-gap" in explicit and a.control_scope != "trial":
         p.error("--max-partner-gap requires trial controls")
+    if a.rate_limit_stop is not None and a.execution_policy != "paired-cautious":
+        p.error("--rate-limit-stop requires --execution-policy paired-cautious")
+    if a.rate_limit_stop == "after-pair" and (
+        a.trials is None or a.control_scope != "trial" or a.control != "always"
+    ):
+        p.error("--rate-limit-stop after-pair requires fixed trials and always-on trial controls")
+    if a.execution_policy == "paired-cautious" and a.rate_limit_stop is None:
+        a.rate_limit_stop = "immediate"
     policy_flags = {
         "--trials",
         "--control",
@@ -618,6 +627,7 @@ class Engine:
             "workers",
             "start_gap",
             "execution_policy",
+            "rate_limit_stop",
             "timeout_first",
             "timeout_retry",
             "timeout_clearnet",
@@ -695,8 +705,22 @@ class Engine:
             },
         )
 
+    def permitted_partner(self, bundle):
+        # Bundles serialize their requests. The only exception to a latched stop
+        # matches the queued route, pair, and occurrence from the first 429.
+        stop = self.hostname_stops.get(bundle.target["hostname"])
+        if (
+            stop and bundle.pending
+            and stop["triggering_target_id"] == bundle.target["target_id"]
+            and bundle.pending[2] == stop.get("triggering_pair_id")
+            and bundle.pending[0] == stop.get("permitted_partner_route")
+        ):
+            return stop
+        return None
+
     def launch(self, bundle=None):
-        if bundle and bundle.target["hostname"] in self.hostname_stops:
+        permission = self.permitted_partner(bundle) if bundle else None
+        if bundle and bundle.target["hostname"] in self.hostname_stops and not permission:
             self.omit(bundle)
             return False
         if CANCELLED:
@@ -765,6 +789,8 @@ class Engine:
                 else ("local" if self.args.reproducible else "inherited_unknown"),
             },
         )
+        if permission:
+            fields["rate_limit_trigger_attempt_id"] = permission["triggering_attempt_id"]
         request_dir = Path(self.temp.name) / str(self.sequence)
         request_dir.mkdir(mode=0o700)
         # The timestamp precedes Popen; emitting after registration ensures an
@@ -1036,7 +1062,8 @@ class Engine:
         process.stdout.close()
         process.wait(timeout=1)
         self.active.pop(process.pid, None)
-        shutil.rmtree(task["directory"], ignore_errors=True)
+        if self.args.rate_limit_stop != "after-pair":
+            shutil.rmtree(task["directory"], ignore_errors=True)
         if bundle:
             bundle.active = None
         if bundle and fields["pair_id"]:
@@ -1062,26 +1089,43 @@ class Engine:
                 # Advancing records conditional pairs even during cancellation.
                 # It only queues work; launch() independently rejects cancellation.
                 bundle.advance(observation)
-                if (
-                    self.args.execution_policy == "paired-cautious"
-                    and result["http_status"] == 429
-                ):
-                    host = bundle.target["hostname"]
-                    if host not in self.hostname_stops:
-                        stop = dict(
-                            hostname=host, triggering_attempt_id=end["attempt_id"],
-                            triggering_target_id=end["target_id"], route=end["route"],
-                            http_status=429,
-                        )
-                        self.hostname_stops[host] = stop
-                        self.writer.emit("hostname_stop", **stop)
-                    self.omit(bundle)
+                if self.args.execution_policy == "paired-cautious":
+                    self.apply_hostname_stop(bundle, end)
             else:
                 self.preflight_ok = result["tor_verified"] is True
-        elif not abort:
+        # In after-pair mode, a scratch cleanup fault must stop admission
+        # before the next launch, even if the terminal cleanup can retry it.
+        if self.args.rate_limit_stop == "after-pair":
+            try:
+                shutil.rmtree(task["directory"])
+            except OSError as exc:
+                raise Failure("local request cleanup failed") from exc
+        if status != "complete" and not abort:
             raise Failure("local adapter/setup failed")
 
+    def apply_hostname_stop(self, bundle, end):
+        host = bundle.target["hostname"]
+        if end["http_status"] == 429 and host not in self.hostname_stops:
+            stop = dict(
+                hostname=host, triggering_attempt_id=end["attempt_id"],
+                triggering_target_id=end["target_id"], route=end["route"],
+                http_status=429,
+            )
+            if self.args.rate_limit_stop == "after-pair":
+                pair = end["pair_id"]
+                stop.update(
+                    triggering_pair_id=pair,
+                    permitted_partner_route=bundle.pending[0]
+                    if bundle.pending and bundle.pending[2] == pair
+                    and bundle.pending[0] != end["route"] else None,
+                )
+            self.hostname_stops[host] = stop
+            self.writer.emit("hostname_stop", **stop)
+        if host in self.hostname_stops and not self.permitted_partner(bundle):
+            self.omit(bundle)
+
     def end_bundle(self, bundle):
+        stop = self.hostname_stops.get(bundle.target["hostname"])
         for pair_id, pair in bundle.pairs.items():
             observations = pair["attempts"]
             complete = len(observations) == 2 and all(
@@ -1107,8 +1151,10 @@ class Engine:
                 ],
                 **(dict(missing_reason=dict(
                     reason="hostname_stop",
-                    **self.hostname_stops[bundle.target["hostname"]],
-                )) if bundle.policy_retired and not complete else {}),
+                    **stop,
+                )) if bundle.policy_retired and not complete
+                and not (stop.get("permitted_partner_route")
+                         and stop["triggering_pair_id"] == pair_id) else {}),
                 aborted_routes=[
                     r
                     for r, observation in observations.items()
@@ -1184,10 +1230,23 @@ class Engine:
         if bundle.done or key in self.omissions:
             return
         known, unknown = self.remaining_work(bundle)
+        stop = self.hostname_stops[bundle.target["hostname"]]
+        # On interruption/failure, later trials are still suppressed. An
+        # unfinished permitted partner belongs to unresolved work instead.
+        route = stop.get("permitted_partner_route")
+        if route and stop["triggering_target_id"] == key:
+            trial = bundle.pairs[stop["triggering_pair_id"]]["trial_id"]
+            for item in known[:]:
+                if item["route"] == route and item["trial_range"][0] == trial:
+                    if item["count"] == 1:
+                        known.remove(item)
+                    else:
+                        item["trial_range"][0] += 1
+                        item["count"] -= 1
         if not known and not unknown:
             return
         omission = dict(
-            reason="hostname_stop", **self.hostname_stops[bundle.target["hostname"]],
+            reason="hostname_stop", **stop,
             known_required=known, eligibility_undetermined=unknown,
         )
         self.omissions[key] = omission
@@ -1272,9 +1331,13 @@ class Engine:
                 bundle = Bundle(target, self.args)
                 bundle.advance()
             known, unknown = self.remaining_work(bundle)
-            category = "omitted" if key in self.omissions else "unresolved"
-            counts["known_required_" + category] += sum(x["count"] for x in known)
-            counts["eligibility_undetermined_" + category] += sum(x["count"] for x in unknown)
+            omission = self.omissions.get(key, {})
+            for name, remaining in (
+                ("known_required", known), ("eligibility_undetermined", unknown)
+            ):
+                omitted = sum(x["count"] for x in omission.get(name, []))
+                counts[name + "_omitted"] += omitted
+                counts[name + "_unresolved"] += sum(x["count"] for x in remaining) - omitted
             # Count only opportunities whose ineligibility follows from observed
             # outcomes. An upper-bound remainder alone never proves omissions.
             history = getattr(bundle, "history", [])
@@ -1290,6 +1353,7 @@ class Engine:
 
     def cleanup(self):
         self.stopping = True
+        failure = None
         # TERM, short grace, then KILL every owned session, including leaders
         # already reaped. Never inspect or signal unrelated process trees.
         for task in list(self.active.values()):
@@ -1298,7 +1362,8 @@ class Engine:
         while self.active and time.monotonic() < deadline:
             try:
                 self.read_ready(0.01)
-            except Failure:
+            except Failure as exc:
+                failure = exc
                 break
         for task in list(self.active.values()):
             self.kill_group(task["process"].pid, signal.SIGKILL)
@@ -1307,15 +1372,17 @@ class Engine:
         # Drain bytes already produced before marking unfinished observations.
         try:
             self.read_ready(0)
-        except Failure:
-            pass
+        except Failure as exc:
+            failure = exc
         for task in list(self.active.values()):
             try:
                 self.finish(task, abort=True)
-            except Failure:
-                pass
+            except Failure as exc:
+                failure = exc
         self.selector.close()
         self.temp.cleanup()
+        if failure is not None and self.args.rate_limit_stop == "after-pair":
+            raise failure
 
     def run(self):
         state, code = "complete", 0
@@ -1383,6 +1450,8 @@ class Engine:
                     if self.args.execution_policy == "paired-cautious":
                         self.omit_stopped_occurrences()
                     for bundle in self.bundles:
+                        if bundle.target["hostname"] in self.hostname_stops:
+                            self.omit(bundle)
                         self.end_bundle(bundle)
                     coverage = {}
                     if self.args.execution_policy == "paired-cautious":

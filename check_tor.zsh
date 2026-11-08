@@ -177,6 +177,8 @@ usage() {
     print -r -- "  --start-gap SECONDS       Global probe-start interval, 0–3600 (default: 0)."
     print -r -- "  --execution-policy legacy|paired-cautious  Default: legacy."
     print -r -- "    paired-cautious prioritizes ready partners and stops a hostname after HTTP 429."
+    print -r -- "  --rate-limit-stop immediate|after-pair  Requires paired-cautious."
+    print -r -- "    Default: immediate. after-pair requires fixed trials and always-on trial controls."
     print -r -- ""
     print -r -- "Redirect-limit stops leave subsequent access unobserved; preflight follows no redirects."
     print -r -- "jsonl-v2 adds bounded hop evidence; see DETAILED-OUTPUT.md for limits and privacy."

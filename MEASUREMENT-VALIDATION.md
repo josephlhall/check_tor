@@ -160,7 +160,12 @@ partners and omits further work for an input hostname after an explicit HTTP
 or replacement trials. Detailed records distinguish a shortened schedule from
 full coverage and scanner failure. Bounded `Retry-After` evidence records
 server metadata with explicit clock limitations; it cannot establish when
-access will succeed. Offline tests establish this policy's software behavior,
+access will succeed. For fixed always-controlled trials, the optional
+`--rate-limit-stop after-pair` preserves the triggering comparison by allowing
+only its unissued partner. Record that choice when describing a schedule.
+The partner may start before the advised delay elapses, and a different route
+does not establish a separate limit. Keep suppressed later observations
+separate from a permitted partner that failed to complete. Offline tests establish this policy's software behavior,
 not its calibration against browser access.
 
 ## Optional detailed scanner observations

@@ -1437,6 +1437,193 @@ class MeasurementTests(unittest.TestCase):
                 self.assertEqual(rows[-1]["target_states"][0]["state"], "partial")
                 self.assert_accounting(rows)
 
+    def test_after_pair_only_finishes_triggering_occurrence(self):
+        for order, first, partner in (
+            ("tor-first", "tor", "direct"), ("direct-first", "direct", "tor"),
+            ("counterbalanced", "direct", "tor"),
+        ):
+            with self.subTest(order=order):
+                self.clear_logs()
+                seed = ["--seed", "1"] if order == "counterbalanced" else []
+                status, rows, error = self.run_scan(
+                    "--execution-policy", "paired-cautious", "--rate-limit-stop=after-pair",
+                    "--trials", 3, "--control", "always", "--control-scope", "trial",
+                    "--workers", 2, "--start-gap", 0.04, "--order", order, *seed,
+                    targets=["alpha.example.test/a", "ALPHA.example.test.:8443/b", "beta.example.test"],
+                    plan={
+                        "https://alpha.example.test/a|" + first: [
+                            {"code": 429, "headers": "Retry-After: 17\r\n", "delay": 0.2}
+                        ],
+                        "https://alpha.example.test/a|" + partner: [
+                            {"code": 429, "headers": "Retry-After: 29\r\n"}
+                        ],
+                    },
+                )
+                self.assertEqual(status, 3, error)
+                self.assertEqual(rows[0]["settings"]["rate_limit_stop"], "after-pair")
+                attempts = self.select(rows, "attempt_end", "target")
+                alpha = [row for row in attempts if row["target_id"] == "target-1"]
+                self.assertEqual([row["route"] for row in alpha], [first, partner])
+                self.assertTrue(all(row["complete"] and row["verdict"] == "RATELIMIT" for row in alpha))
+                self.assertEqual([row["retry_after"]["wait_seconds"] for row in alpha], [17, 29])
+                self.assertEqual(len(attempts), 8)
+                self.assertTrue(all(row["target_id"] == "target-3" for row in attempts if row not in alpha))
+                stop, = self.select(rows, "hostname_stop")
+                self.assertEqual(stop["triggering_attempt_id"], alpha[0]["attempt_id"])
+                self.assertEqual(stop["triggering_pair_id"], alpha[0]["pair_id"])
+                self.assertEqual(stop["permitted_partner_route"], partner)
+                self.assertEqual(alpha[1]["rate_limit_trigger_attempt_id"], alpha[0]["attempt_id"])
+                start, = [row for row in self.select(rows, "attempt_start")
+                          if "rate_limit_trigger_attempt_id" in row]
+                self.assertEqual(start["attempt_id"], alpha[1]["attempt_id"])
+                pair, = [row for row in self.select(rows, "pair_end") if row["pair_id"] == alpha[0]["pair_id"]]
+                self.assertEqual(pair["state"], "complete")
+                self.assertEqual(pair["attempt_ids"], {row["route"]: row["attempt_id"] for row in alpha})
+                self.assertGreaterEqual(pair["observed_start_gap_seconds"], 0.04)
+                omissions = {row["target_id"]: row for row in self.select(rows, "target_omission")}
+                self.assertEqual(set(omissions), {"target-1", "target-2"})
+                for target, first_trial in (("target-1", 2), ("target-2", 1)):
+                    self.assertEqual(
+                        {x["route"]: x["trial_range"] for x in omissions[target]["known_required"]},
+                        {"tor": [first_trial, 3], "direct": [first_trial, 3]},
+                    )
+                end = self.assert_accounting(rows)
+                self.assertEqual(end["state"], "policy_stopped")
+                self.assertEqual(end["omission_counts"]["known_required"], 10)
+                self.assertEqual(end["schedule_accounting"]["known_required_unresolved"], 0)
+                self.assertEqual(len(self.calls()), 9)
+
+    def test_after_pair_final_trial_and_second_route_trigger(self):
+        for limited, other, permission in (
+            ("tor", 403, "direct"), ("direct", 200, None), ("tor", 503, "direct"), ("tor", None, "direct")
+        ):
+            with self.subTest(limited=limited, other=other):
+                self.clear_logs()
+                options = [
+                    "--execution-policy", "paired-cautious", "--rate-limit-stop", "after-pair",
+                    "--trials", 1, "--control", "always", "--control-scope", "trial",
+                ]
+                status, rows, error = self.run_scan(
+                    *options,
+                    plan={"https://alpha.example.test": [
+                              {"code": other} if other is not None else {"code": 0, "exit": 28}
+                          ],
+                          "https://alpha.example.test|" + limited: [{"code": 429}]},
+                )
+                self.assertEqual(status, 0, error)
+                self.assertEqual(self.select(rows, "hostname_stop")[0]["permitted_partner_route"], permission)
+                self.assertEqual(self.select(rows, "pair_end")[0]["state"], "complete")
+                self.assertEqual(self.select(rows, "target_omission"), [])
+                self.assertTrue(self.assert_accounting(rows)["schedule_complete"])
+                self.assertEqual(len(self.calls()), 3)
+
+    def test_after_pair_fatal_before_or_during_permitted_partner(self):
+        spec = importlib.util.spec_from_file_location("after_pair_subject", ROOT / "check_tor_measure.py")
+        coordinator = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(coordinator)
+        for fault in ("signal_before", "signal_during", "local_during", "launch", "output", "scratch", "cleanup"):
+            with self.subTest(fault=fault):
+                self.clear_logs()
+                coordinator.CANCELLED = 0
+                self.addCleanup(setattr, coordinator, "CANCELLED", 0)
+                records = []
+                permission_key = "rate_limit_trigger_attempt_id"
+
+                class CaptureWriter:
+                    failed = False
+
+                    def __init__(self, common):
+                        pass
+
+                    def emit(self, kind, **fields):
+                        if fault == "output" and kind == "hostname_stop":
+                            self.failed = True
+                            raise coordinator.OutputFailure("synthetic output failure")
+                        records.append(dict(type=kind, **fields))
+                        if fault == "signal_before" and kind == "hostname_stop":
+                            coordinator.CANCELLED = signal.SIGTERM
+
+                    def restore(self):
+                        pass
+
+                options = [
+                    "--execution-policy", "paired-cautious", "--rate-limit-stop", "after-pair",
+                    "--trials", "2", "--control", "always", "--control-scope", "trial",
+                    str(self.input),
+                ]
+                with mock.patch.object(coordinator, "Writer", CaptureWriter):
+                    engine = coordinator.Engine(coordinator.arguments(options), coordinator.load_targets(self.input))
+                plan = {"https://alpha.example.test|tor": [{"code": 429}],
+                        "https://alpha.example.test|direct": [{"delay": 10 if fault == "signal_during" else 0}]}
+                engine.env.update(self.environment, MEASUREMENT_TEST_PLAN=json.dumps(plan))
+                original_popen = subprocess.Popen
+                original_result = engine.result
+                original_cleanup = engine.cleanup
+                original_rmtree = shutil.rmtree
+                original_read_ready = engine.read_ready
+
+                def read_ready(*args):
+                    progressed = original_read_ready(*args)
+                    if fault == "signal_during" and any(call["route"] == "direct" for call in self.calls()):
+                        coordinator.CANCELLED = signal.SIGTERM
+                    return progressed
+
+                def rmtree(path, *args, **kwargs):
+                    if fault == "scratch" and path == Path(engine.temp.name) / "2":
+                        self.assertFalse(kwargs.get("ignore_errors", False))
+                        raise OSError("synthetic scratch cleanup failure")
+                    return original_rmtree(path, *args, **kwargs)
+
+                def popen(command, **kwargs):
+                    if fault == "launch" and command[1].endswith("check_tor_probe.zsh") and command[3:4] == ["direct"]:
+                        raise OSError("synthetic partner launch failure")
+                    return original_popen(command, **kwargs)
+
+                def result(task, **kwargs):
+                    data = original_result(task, **kwargs)
+                    if fault == "local_during" and task["fields"]["route"] == "direct":
+                        data.update(local_error="synthetic processing failure", verdict=None)
+                    return data
+
+                def cleanup():
+                    original_cleanup()
+                    if fault == "cleanup":
+                        raise OSError("synthetic cleanup failure")
+
+                with mock.patch.object(coordinator.subprocess, "Popen", popen), \
+                     mock.patch.object(engine, "result", result), \
+                     mock.patch.object(coordinator.shutil, "rmtree", rmtree), \
+                     mock.patch.object(engine, "read_ready", read_ready), \
+                     mock.patch.object(engine, "cleanup", cleanup):
+                    code = engine.run()
+                interrupted = fault.startswith("signal_")
+                self.assertEqual(code, 143 if interrupted else 1)
+                if fault == "output":
+                    self.assertEqual(self.select(records, "run_end"), [])
+                    self.assertEqual(len(self.calls()), 2)
+                    self.assert_clean()
+                    continue
+                end = records[-1]
+                self.assertEqual(end["state"], "interrupted" if interrupted else "error")
+                self.assertEqual(end["omission_counts"]["known_required"], 2)
+                self.assertEqual(end["schedule_accounting"]["known_required_unresolved"], int(fault != "cleanup"))
+                pair = self.select(records, "pair_end")[0]
+                self.assertEqual(pair["missing_routes"], [] if fault == "cleanup" else ["direct"])
+                self.assertNotIn("missing_reason", pair)
+                self.assertEqual(pair["aborted_routes"], ["direct"] if fault == "signal_during" else [])
+                target_ends = self.select(records, "attempt_end", "target")
+                if fault in ("signal_before", "scratch"):
+                    self.assertEqual(len(target_ends), 1)
+                    self.assertNotIn("direct", pair["attempt_ids"])
+                else:
+                    self.assertEqual(len(target_ends), 2)
+                    self.assertEqual(target_ends[-1]["adapter_started"], fault != "launch")
+                    self.assertEqual(target_ends[-1]["complete"], fault == "cleanup")
+                    self.assertEqual(target_ends[-1][permission_key], target_ends[0]["attempt_id"])
+                if fault != "launch":
+                    self.assert_accounting(records)
+                self.assert_clean()
+
     def test_cautious_conditional_and_retry_eligibility_accounting(self):
         for fixed in (True, False):
             with self.subTest(fixed=fixed):
@@ -1488,9 +1675,11 @@ class MeasurementTests(unittest.TestCase):
         specification.loader.exec_module(coordinator)
         # All order variants use two concurrent bundles. Drain one completion
         # at a time so the second must be consumed before any new launch.
-        for control, order, trials in (("always", "tor-first", 1), ("always", "direct-first", 1),
-                                       ("always", "counterbalanced", 1), ("conditional", "tor-first", 2)):
-            with self.subTest(control=control, order=order):
+        for control, order, trials, after_pair in (
+            ("always", "tor-first", 1, False), ("always", "direct-first", 1, False),
+            ("always", "counterbalanced", 1, True), ("conditional", "tor-first", 2, False),
+        ):
+            with self.subTest(control=control, order=order, after_pair=after_pair):
                 records, launches = [], []
                 clock = [0.0]
                 self.input.write_text("alpha.example.test\nbeta.example.test\ngamma.example.test\n")
@@ -1499,6 +1688,9 @@ class MeasurementTests(unittest.TestCase):
                            "--workers", "2", "--start-gap", "0.25"]
                 if order == "counterbalanced":
                     options += ["--seed", "0"]
+
+                if after_pair:
+                    options += ["--rate-limit-stop", "after-pair"]
 
                 class CaptureWriter:
                     failed = False
@@ -1517,6 +1709,8 @@ class MeasurementTests(unittest.TestCase):
                         return False
                     route, trial, pair = bundle.pending
                     self.assertLess(len(engine.active), 2)
+                    if bundle.target["hostname"] in engine.hostname_stops:
+                        self.assertIsNotNone(engine.permitted_partner(bundle))
                     launches.append((bundle.target["target_id"], route, trial, clock[0]))
                     bundle.issued += 1
                     bundle.active = dict(bundle=bundle, request=bundle.pending, start=clock[0],
@@ -1534,7 +1728,9 @@ class MeasurementTests(unittest.TestCase):
                             continue
                         bundle = task["bundle"]
                         route, trial, pair = task["request"]
+                        limited = after_pair and key == "target-2" and bundle.issued == 1
                         observation = dict(route=route, trial_id=trial, complete=True, status="complete",
+                                           target_id=key, pair_id=pair, http_status=429 if limited else 200,
                                            verdict="FAIL" if key == "target-2" and control == "conditional" else "PASS",
                                            attempt_id="virtual-" + str(len(launches)), _start=task["start"])
                         bundle.history = getattr(bundle, "history", []) + [observation]
@@ -1544,6 +1740,7 @@ class MeasurementTests(unittest.TestCase):
                         bundle.active = None
                         del engine.active[key]
                         bundle.advance(observation)
+                        engine.apply_hostname_stop(bundle, observation)
                         return True
                     return False
 
@@ -1655,6 +1852,43 @@ class MeasurementTests(unittest.TestCase):
         self.assertEqual(known[0]["route"], "tor")
         self.assertEqual(known[0]["trial_range"], [1, 1])
         self.assertEqual(unknown[0]["trial_range"], [2, 3])
+
+    def test_rate_limit_stop_option_validation_and_defaults(self):
+        for options in (
+            ("--rate-limit-stop", "after-pair"),
+            ("--rate-limit-stop", "immediate"),
+            ("--execution-policy", "paired-cautious", "--rate-limit-stop", "invalid"),
+            ("--execution-policy", "paired-cautious", "--rate-limit-stop", "after-pair"),
+            ("--execution-policy", "paired-cautious", "--rate-limit-stop", "after-pair",
+             "--trials", 2, "--control", "always"),
+            ("--execution-policy", "paired-cautious", "--rate-limit-stop", "after-pair",
+             "--trials", 2, "--control-scope", "trial"),
+        ):
+            with self.subTest(options=options):
+                status, rows, _ = self.run_scan(*options, input_path=self.temp / "nonexistent.txt")
+                self.assertEqual(status, 2)
+                self.assertEqual(rows, [])
+                self.assertEqual(self.calls(), [])
+        for output in ("text", "jsonl"):
+            result = subprocess.run(
+                [str(SCANNER), "--format", output, "--rate-limit-stop", "after-pair", str(self.input)],
+                env=self.environment, capture_output=True, check=False, timeout=5,
+            )
+            self.assertEqual(result.returncode, 1)
+            self.assertEqual(self.calls(), [])
+        for options, value in (
+            ([], None),
+            (["--execution-policy", "paired-cautious"], "immediate"),
+            (["--execution-policy", "paired-cautious", "--rate-limit-stop", "immediate"], "immediate"),
+        ):
+            with self.subTest(options=options):
+                self.clear_logs()
+                status, rows, error = self.run_scan(
+                    *options, plan={"https://alpha.example.test": [{"code": 429}]},
+                )
+                self.assertEqual(status, 0 if value is None else 3, error)
+                self.assertEqual(rows[0]["settings"]["rate_limit_stop"], value)
+                self.assertEqual(len(self.calls()), 5 if value is None else 2)
 
     def test_cautious_validation_before_input_and_unnecessary_controls(self):
         status, rows, error = self.run_scan(
