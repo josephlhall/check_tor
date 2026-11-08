@@ -76,13 +76,12 @@ Report whether the approved cases produced `DROP` or `TIMEOUT`. A missing
 
 ## Host and remote observation
 
-The Maryland Mac mini is the only measurement host. The Chromebook may be used
-for planning, review, and remote control of that Mac mini. Scanner, Tor Browser,
-ordinary-browser, time capture, and private storage all remain on the Mac mini;
-no Chromebook-native measurement enters the pilot.
+The pilot uses one designated measurement host for the scanner, both browsers,
+timestamp capture, and private storage. A separate client may be used for
+planning, review, and remote control.
 
 Remote observation is permitted through an owner-controlled encrypted remote
-desktop session that displays and controls the Mac mini browsers. The exact
+desktop session that displays and controls the browsers on that host. The exact
 remote-control product and client version are recorded in the private
 environment record at live-readiness review. Remote display latency is a known
 limit on fine-grained timing and is recorded in each affected case's
@@ -96,15 +95,16 @@ the remote session is stable. If the remote session disconnects during a case:
 3. mark the event as a protocol deviation; and
 4. halt the case when safety or comparability is affected.
 
-Mac mini inaccessibility between cases pauses the pilot without creating a
-protocol deviation. The next case keeps its assigned slot and order after
-live-readiness conditions are rechecked.
+If the measurement host becomes unavailable between cases, pause the pilot.
+This pause does not count as a protocol deviation. The next case keeps its
+assigned slot and order after live-readiness conditions are rechecked.
 
 ## Frozen environment choice
 
 The pilot used explicit settings that matched the scanner defaults at the
-recorded commit. The reviewer read these values on the Mac mini on 2026-09-07
-and reverified the environment at Checkpoint B before granting live authority.
+recorded commit. The reviewer read these values on the measurement host on
+2026-09-07 and reverified the environment at Checkpoint B before granting live
+authority.
 
 | Field | Frozen choice or current value |
 |---|---|
@@ -290,11 +290,11 @@ and the fixed public task. The optional I5 diagnostic remains disabled.
 
 The coordinator captures each instrument start immediately before releasing
 the action and captures its end immediately after the stable outcome report.
-Use UTC ISO 8601 timestamps from the Mac mini. Browser timing fields measure
-the observed Mac mini state; remote latency and any uncertainty are recorded
-separately. If action-time capture fails, use null and record the available
-coordinator bounds as a deviation. Never reconstruct timing from screenshots,
-files, or memory.
+Use UTC ISO 8601 timestamps from the measurement host. Browser timing fields
+reflect the state observed on that host. Record remote latency and any
+uncertainty separately. If action-time capture fails, use null and record the
+available coordinator bounds as a deviation. Never reconstruct timing from
+screenshots, files, or memory.
 
 Before closing a case:
 
@@ -322,10 +322,10 @@ batch review, the human reviewer checks the following.
 - row-audit completion and raw-artifact deletion; and
 - whether the remaining approved cases are still safe and useful.
 
-A pause for travel, Mac mini downtime, or owner availability is ordinary. On
-resume, recheck repository commit, environment versions, Tor and browser state,
-time sync, private-root protection, backup exclusion, endpoint eligibility,
-order, and the next case files before starting the next case.
+The pilot may pause between cases when the host or required personnel are
+unavailable. Before starting the next case, recheck the repository commit,
+environment versions, Tor and browser state, time sync, private-root protection,
+backup exclusion, endpoint eligibility, case order, and the next case files.
 
 ## Live-readiness gate
 
