@@ -190,16 +190,23 @@ Explicit scheduling options make direct probes bypass ambient proxies.
 ```
 
 The records identify which requests belong together and include timings,
-redirect evidence, and a terminal run state. You can change pair order, let
-different hostnames overlap, and pace the start of probes. Direct requests
-can reveal your ordinary connection to target sites. Repeated trials can
+redirect evidence, and a terminal run state. They also retain bounded
+`Onion-Location` and onion `Alt-Svc` evidence from the final response on each
+route. The scanner does not contact an advertised service. You can change
+pair order, let different hostnames overlap, and pace the start of probes.
+Direct requests can reveal your ordinary connection to target sites. Repeated trials can
 share a Tor exit and other conditions, so treat them as repeated observations
 rather than independent samples.
 
 The optional `--execution-policy paired-cautious` gives ready second members
 of pairs priority. If either route observes a completed HTTP 429, the scanner
 stops pending work for that input hostname and continues other hostnames.
-It records the work it omits. An otherwise successful run with omissions
+With fixed trials and always-on per-trial controls, add
+`--rate-limit-stop after-pair` to allow only the other route of that same
+pair if it has yet to start. The default `immediate` stops that partner too.
+The opt-in may start the partner before a received `Retry-After` interval
+elapses. HTTP does not guarantee an exemption for a different route.
+The scanner records the work it omits. An otherwise successful run with omissions
 exits `3` with `state: "policy_stopped"` and `complete: false`. The default
 `legacy` policy retains the existing schedule. Before opting in, check that
 your JSONL v2 reader accepts the new terminal state and exit code.
@@ -264,8 +271,9 @@ open loopback connections. No Tor process or Internet access is needed.
 ```
 
 The Zsh tests cover verdicts and the ordinary CLI. The Python tests cover
-detailed measurements, transport and redirect behavior, `Retry-After`
-evidence, and real curl certificate validation against a local HTTPS server.
+detailed measurements, transport and redirect behavior, `Retry-After` and
+onion advertisement evidence, and real curl certificate validation against a
+local HTTPS server.
 The TLS tests cover a trusted certificate, an untrusted issuer, and a hostname
 mismatch. They use disposable trust settings without changing the machine’s
 trust store. Other transport tests use local files and fake curl for several

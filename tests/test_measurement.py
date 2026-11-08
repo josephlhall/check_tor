@@ -993,6 +993,7 @@ class MeasurementTests(unittest.TestCase):
             "check_tor_measure.py",
             "check_tor_probe.zsh",
             "check_tor_retry.py",
+            "check_tor_onion.py",
         ):
             shutil.copy2(ROOT / filename, copy / filename)
         (copy / "check_tor_probe.zsh").write_text(
@@ -1437,6 +1438,288 @@ class MeasurementTests(unittest.TestCase):
                 self.assertEqual(rows[-1]["target_states"][0]["state"], "partial")
                 self.assert_accounting(rows)
 
+    def test_after_pair_only_finishes_triggering_occurrence(self):
+        for order, first, partner in (
+            ("tor-first", "tor", "direct"), ("direct-first", "direct", "tor"),
+            ("counterbalanced", "direct", "tor"),
+        ):
+            with self.subTest(order=order):
+                self.clear_logs()
+                seed = ["--seed", "1"] if order == "counterbalanced" else []
+                status, rows, error = self.run_scan(
+                    "--execution-policy", "paired-cautious", "--rate-limit-stop=after-pair",
+                    "--trials", 3, "--control", "always", "--control-scope", "trial",
+                    "--workers", 2, "--start-gap", 0.04, "--order", order, *seed,
+                    targets=["alpha.example.test/a", "ALPHA.example.test.:8443/b", "beta.example.test"],
+                    plan={
+                        "https://alpha.example.test/a|" + first: [
+                            {"code": 429, "headers": "Retry-After: 17\r\n", "delay": 0.2}
+                        ],
+                        "https://alpha.example.test/a|" + partner: [
+                            {"code": 429, "headers": "Retry-After: 29\r\n"}
+                        ],
+                    },
+                )
+                self.assertEqual(status, 3, error)
+                self.assertEqual(rows[0]["settings"]["rate_limit_stop"], "after-pair")
+                attempts = self.select(rows, "attempt_end", "target")
+                alpha = [row for row in attempts if row["target_id"] == "target-1"]
+                self.assertEqual([row["route"] for row in alpha], [first, partner])
+                self.assertTrue(all(row["complete"] and row["verdict"] == "RATELIMIT" for row in alpha))
+                self.assertEqual([row["retry_after"]["wait_seconds"] for row in alpha], [17, 29])
+                self.assertEqual(len(attempts), 8)
+                self.assertTrue(all(row["target_id"] == "target-3" for row in attempts if row not in alpha))
+                stop, = self.select(rows, "hostname_stop")
+                self.assertEqual(stop["triggering_attempt_id"], alpha[0]["attempt_id"])
+                self.assertEqual(stop["triggering_pair_id"], alpha[0]["pair_id"])
+                self.assertEqual(stop["permitted_partner_route"], partner)
+                self.assertEqual(alpha[1]["rate_limit_trigger_attempt_id"], alpha[0]["attempt_id"])
+                start, = [row for row in self.select(rows, "attempt_start")
+                          if "rate_limit_trigger_attempt_id" in row]
+                self.assertEqual(start["attempt_id"], alpha[1]["attempt_id"])
+                pair, = [row for row in self.select(rows, "pair_end") if row["pair_id"] == alpha[0]["pair_id"]]
+                self.assertEqual(pair["state"], "complete")
+                self.assertEqual(pair["attempt_ids"], {row["route"]: row["attempt_id"] for row in alpha})
+                self.assertGreaterEqual(pair["observed_start_gap_seconds"], 0.04)
+                omissions = {row["target_id"]: row for row in self.select(rows, "target_omission")}
+                self.assertEqual(set(omissions), {"target-1", "target-2"})
+                for target, first_trial in (("target-1", 2), ("target-2", 1)):
+                    self.assertEqual(
+                        {x["route"]: x["trial_range"] for x in omissions[target]["known_required"]},
+                        {"tor": [first_trial, 3], "direct": [first_trial, 3]},
+                    )
+                end = self.assert_accounting(rows)
+                self.assertEqual(end["state"], "policy_stopped")
+                self.assertEqual(end["omission_counts"]["known_required"], 10)
+                self.assertEqual(end["schedule_accounting"]["known_required_unresolved"], 0)
+                self.assertEqual(len(self.calls()), 9)
+
+    def test_after_pair_final_trial_and_second_route_trigger(self):
+        for limited, other, permission in (
+            ("tor", 403, "direct"), ("direct", 200, None), ("tor", 503, "direct"), ("tor", None, "direct")
+        ):
+            with self.subTest(limited=limited, other=other):
+                self.clear_logs()
+                options = [
+                    "--execution-policy", "paired-cautious", "--rate-limit-stop", "after-pair",
+                    "--trials", 1, "--control", "always", "--control-scope", "trial",
+                ]
+                status, rows, error = self.run_scan(
+                    *options,
+                    plan={"https://alpha.example.test": [
+                              {"code": other} if other is not None else {"code": 0, "exit": 28}
+                          ],
+                          "https://alpha.example.test|" + limited: [{"code": 429}]},
+                )
+                self.assertEqual(status, 0, error)
+                self.assertEqual(self.select(rows, "hostname_stop")[0]["permitted_partner_route"], permission)
+                self.assertEqual(self.select(rows, "pair_end")[0]["state"], "complete")
+                self.assertEqual(self.select(rows, "target_omission"), [])
+                self.assertTrue(self.assert_accounting(rows)["schedule_complete"])
+                self.assertEqual(len(self.calls()), 3)
+
+    def test_after_pair_partner_carries_passive_onion_evidence(self):
+        host = OnionEvidenceTests.host
+        for with_advertisements in (False, True):
+            with self.subTest(with_advertisements=with_advertisements):
+                self.clear_logs()
+                extra = (f"Onion-Location: http://{host}/synthetic-private-path\r\n"
+                         f'Alt-Svc: h2="{host}:443"\r\n') if with_advertisements else ""
+                status, rows, error = self.run_scan(
+                    "--execution-policy", "paired-cautious", "--rate-limit-stop", "after-pair",
+                    "--trials", 1, "--control", "always", "--control-scope", "trial",
+                    plan={
+                        "https://alpha.example.test|tor": [{"code": 429, "headers": "Retry-After: 60\r\n" + extra}],
+                        "https://alpha.example.test|direct": [{"code": 429, "headers": "Retry-After: 120\r\n" + extra}],
+                    },
+                )
+                self.assertEqual(status, 0, error)
+                ends = self.select(rows, "attempt_end", "target")
+                self.assertEqual([r["route"] for r in ends], ["tor", "direct"])
+                self.assertEqual([r["verdict"] for r in ends], ["RATELIMIT", "RATELIMIT"])
+                self.assertEqual([r["retry_after"]["wait_seconds"] for r in ends], [60, 120])
+                self.assertEqual(ends[1]["rate_limit_trigger_attempt_id"], ends[0]["attempt_id"])
+                self.assertEqual(self.select(rows, "pair_end")[0]["state"], "complete")
+                for record in ends:
+                    evidence = record["onion_advertisements"]
+                    self.assertEqual(evidence["source"], {"https": True, "onion_hostname": False})
+                    state = "available" if with_advertisements else "absent"
+                    self.assertEqual(evidence["onion_location"]["state"], state)
+                    self.assertEqual(evidence["alt_svc"]["state"], state)
+                self.assertNotIn("synthetic-private-path", json.dumps(rows))
+                self.assertNotIn("onion_advertisements", self.select(rows, "attempt_end", "preflight")[0])
+                self.assertEqual(rows[0]["settings"]["onion_advertisement_bounds"]["evidence_bytes"], 4096)
+                calls = self.calls()
+                self.assertEqual([r["url"] for r in calls], [PREFLIGHT, "https://alpha.example.test", "https://alpha.example.test"])
+                self.assertTrue(all("--alt-svc" not in r["args"] for r in calls))
+                self.assert_accounting(rows)
+
+    def test_onion_evidence_capture_loss_keeps_completed_verdict(self):
+        status, rows, error = self.run_scan(
+            "--trials", 1, "--control", "always", "--control-scope", "trial",
+            plan={
+                "https://alpha.example.test|tor": [{"headers": "Alt-Svc: incomplete", "code": 200}],
+                "https://alpha.example.test|direct": [{"omit_writeout": True}],
+            },
+        )
+        self.assertEqual(status, 0, error)
+        tor, direct = self.select(rows, "attempt_end", "target")
+        self.assertEqual(tor["verdict"], "PASS")
+        self.assertTrue(tor["complete"])
+        for attempt, reason in ((tor, "incomplete_final_block"), (direct, "native_status_unavailable")):
+            self.assertEqual(attempt["onion_advertisements"]["alt_svc"], {"state": "unavailable", "reason": reason})
+        self.assertEqual(len(self.calls()), 3)
+        self.assert_accounting(rows)
+
+    def test_after_pair_fatal_before_or_during_permitted_partner(self):
+        spec = importlib.util.spec_from_file_location("after_pair_subject", ROOT / "check_tor_measure.py")
+        coordinator = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(coordinator)
+        for fault in ("signal_before", "signal_during", "signal_and_local", "signal_and_setup", "signal_accounting", "signal_target_states", "local_during", "launch", "output", "scratch", "cleanup"):
+            with self.subTest(fault=fault):
+                self.clear_logs()
+                coordinator.CANCELLED = 0
+                self.addCleanup(setattr, coordinator, "CANCELLED", 0)
+                records = []
+                permission_key = "rate_limit_trigger_attempt_id"
+
+                class CaptureWriter:
+                    failed = False
+
+                    def __init__(self, common):
+                        pass
+
+                    def emit(self, kind, **fields):
+                        if fault == "output" and kind == "hostname_stop":
+                            self.failed = True
+                            raise coordinator.OutputFailure("synthetic output failure")
+                        records.append(dict(type=kind, **fields))
+                        if fault == "signal_before" and kind == "hostname_stop":
+                            coordinator.CANCELLED = signal.SIGTERM
+
+                    def restore(self):
+                        pass
+
+                options = [
+                    "--execution-policy", "paired-cautious", "--rate-limit-stop", "after-pair",
+                    "--trials", "2", "--control", "always", "--control-scope", "trial",
+                    str(self.input),
+                ]
+                with mock.patch.object(coordinator, "Writer", CaptureWriter):
+                    engine = coordinator.Engine(coordinator.arguments(options), coordinator.load_targets(self.input))
+                plan = {"https://alpha.example.test|tor": [{"code": 429}],
+                        "https://alpha.example.test|direct": [{
+                            "delay": 10 if fault == "signal_during" else 0,
+                            "exit": 23 if fault == "signal_and_local" else 0,
+                        }]}
+                engine.env.update(self.environment, MEASUREMENT_TEST_PLAN=json.dumps(plan))
+                original_popen = subprocess.Popen
+                original_result = engine.result
+                original_cleanup = engine.cleanup
+                original_rmtree = shutil.rmtree
+                original_read_ready = engine.read_ready
+                original_finish = engine.finish
+                original_accounting = engine.schedule_accounting
+                original_public_target = coordinator.public_target
+                accounting_finished = False
+
+                def public_target(target):
+                    value = original_public_target(target)
+                    if fault == "signal_target_states" and accounting_finished:
+                        coordinator.CANCELLED = signal.SIGTERM
+                    return value
+
+                def accounting():
+                    nonlocal accounting_finished
+                    result = original_accounting()
+                    accounting_finished = True
+                    if fault == "signal_accounting":
+                        coordinator.CANCELLED = signal.SIGTERM
+                    return result
+
+                def finish(task, abort=False):
+                    if fault in ("signal_and_local", "signal_and_setup") and task["fields"]["route"] == "direct":
+                        # The adapter has already produced its local I/O error.
+                        # Cancellation just before consumption must preserve it.
+                        self.assertEqual(task["process"].returncode, 70 if fault == "signal_and_setup" else 0)
+                        self.assertTrue(task["eof"])
+                        coordinator.CANCELLED = signal.SIGTERM
+                        abort = True
+                    return original_finish(task, abort=abort)
+
+                def read_ready(*args):
+                    progressed = original_read_ready(*args)
+                    if fault == "signal_during" and any(call["route"] == "direct" for call in self.calls()):
+                        coordinator.CANCELLED = signal.SIGTERM
+                    return progressed
+
+                def rmtree(path, *args, **kwargs):
+                    if fault == "scratch" and path == Path(engine.temp.name) / "2":
+                        self.assertFalse(kwargs.get("ignore_errors", False))
+                        raise OSError("synthetic scratch cleanup failure")
+                    return original_rmtree(path, *args, **kwargs)
+
+                def popen(command, **kwargs):
+                    if fault == "signal_and_setup" and command[3:4] == ["direct"]:
+                        (Path(command[2]) / "body").mkdir()
+                    if fault == "launch" and command[1].endswith("check_tor_probe.zsh") and command[3:4] == ["direct"]:
+                        raise OSError("synthetic partner launch failure")
+                    return original_popen(command, **kwargs)
+
+                def result(task, **kwargs):
+                    data = original_result(task, **kwargs)
+                    if fault == "local_during" and task["fields"]["route"] == "direct":
+                        data.update(local_error="synthetic processing failure", verdict=None)
+                    return data
+
+                def cleanup():
+                    original_cleanup()
+                    if fault == "cleanup":
+                        raise OSError("synthetic cleanup failure")
+
+                with mock.patch.object(coordinator.subprocess, "Popen", popen), \
+                     mock.patch.object(engine, "result", result), \
+                     mock.patch.object(coordinator.shutil, "rmtree", rmtree), \
+                     mock.patch.object(engine, "read_ready", read_ready), \
+                     mock.patch.object(engine, "finish", finish), \
+                     mock.patch.object(engine, "schedule_accounting", accounting), \
+                     mock.patch.object(coordinator, "public_target", public_target), \
+                     mock.patch.object(engine, "cleanup", cleanup):
+                    code = engine.run()
+                interrupted = fault in ("signal_before", "signal_during", "signal_accounting", "signal_target_states")
+                partner_complete = fault in ("cleanup", "signal_accounting", "signal_target_states")
+                self.assertEqual(code, 143 if interrupted else 1)
+                if fault == "output":
+                    self.assertEqual(self.select(records, "run_end"), [])
+                    self.assertEqual(len(self.calls()), 2)
+                    self.assert_clean()
+                    continue
+                end = records[-1]
+                self.assertEqual(end["state"], "interrupted" if interrupted else "error")
+                self.assertEqual(end["omission_counts"]["known_required"], 2)
+                self.assertEqual(end["schedule_accounting"]["known_required_unresolved"], int(not partner_complete))
+                pair = self.select(records, "pair_end")[0]
+                self.assertEqual(pair["missing_routes"], [] if partner_complete else ["direct"])
+                self.assertNotIn("missing_reason", pair)
+                self.assertEqual(pair["aborted_routes"], ["direct"] if fault == "signal_during" else [])
+                target_ends = self.select(records, "attempt_end", "target")
+                if fault in ("signal_before", "scratch"):
+                    self.assertEqual(len(target_ends), 1)
+                    self.assertNotIn("direct", pair["attempt_ids"])
+                else:
+                    self.assertEqual(len(target_ends), 2)
+                    self.assertEqual(target_ends[-1]["adapter_started"], fault != "launch")
+                    self.assertEqual(target_ends[-1]["complete"], partner_complete)
+                    if fault in ("signal_and_local", "signal_and_setup"):
+                        self.assertEqual(target_ends[-1]["status"], "error")
+                        self.assertIsNotNone(end["error"])
+                    if fault == "signal_and_local":
+                        self.assertEqual(target_ends[-1]["local_error"], "local_curl_setup_or_io_failed")
+                    self.assertEqual(target_ends[-1][permission_key], target_ends[0]["attempt_id"])
+                if fault != "launch":
+                    self.assert_accounting(records)
+                self.assert_clean()
+
     def test_cautious_conditional_and_retry_eligibility_accounting(self):
         for fixed in (True, False):
             with self.subTest(fixed=fixed):
@@ -1488,9 +1771,11 @@ class MeasurementTests(unittest.TestCase):
         specification.loader.exec_module(coordinator)
         # All order variants use two concurrent bundles. Drain one completion
         # at a time so the second must be consumed before any new launch.
-        for control, order, trials in (("always", "tor-first", 1), ("always", "direct-first", 1),
-                                       ("always", "counterbalanced", 1), ("conditional", "tor-first", 2)):
-            with self.subTest(control=control, order=order):
+        for control, order, trials, after_pair in (
+            ("always", "tor-first", 1, False), ("always", "direct-first", 1, False),
+            ("always", "counterbalanced", 1, True), ("conditional", "tor-first", 2, False),
+        ):
+            with self.subTest(control=control, order=order, after_pair=after_pair):
                 records, launches = [], []
                 clock = [0.0]
                 self.input.write_text("alpha.example.test\nbeta.example.test\ngamma.example.test\n")
@@ -1499,6 +1784,9 @@ class MeasurementTests(unittest.TestCase):
                            "--workers", "2", "--start-gap", "0.25"]
                 if order == "counterbalanced":
                     options += ["--seed", "0"]
+
+                if after_pair:
+                    options += ["--rate-limit-stop", "after-pair"]
 
                 class CaptureWriter:
                     failed = False
@@ -1517,6 +1805,8 @@ class MeasurementTests(unittest.TestCase):
                         return False
                     route, trial, pair = bundle.pending
                     self.assertLess(len(engine.active), 2)
+                    if bundle.target["hostname"] in engine.hostname_stops:
+                        self.assertIsNotNone(engine.permitted_partner(bundle))
                     launches.append((bundle.target["target_id"], route, trial, clock[0]))
                     bundle.issued += 1
                     bundle.active = dict(bundle=bundle, request=bundle.pending, start=clock[0],
@@ -1534,7 +1824,9 @@ class MeasurementTests(unittest.TestCase):
                             continue
                         bundle = task["bundle"]
                         route, trial, pair = task["request"]
+                        limited = after_pair and key == "target-2" and bundle.issued == 1
                         observation = dict(route=route, trial_id=trial, complete=True, status="complete",
+                                           target_id=key, pair_id=pair, http_status=429 if limited else 200,
                                            verdict="FAIL" if key == "target-2" and control == "conditional" else "PASS",
                                            attempt_id="virtual-" + str(len(launches)), _start=task["start"])
                         bundle.history = getattr(bundle, "history", []) + [observation]
@@ -1544,6 +1836,7 @@ class MeasurementTests(unittest.TestCase):
                         bundle.active = None
                         del engine.active[key]
                         bundle.advance(observation)
+                        engine.apply_hostname_stop(bundle, observation)
                         return True
                     return False
 
@@ -1656,6 +1949,43 @@ class MeasurementTests(unittest.TestCase):
         self.assertEqual(known[0]["trial_range"], [1, 1])
         self.assertEqual(unknown[0]["trial_range"], [2, 3])
 
+    def test_rate_limit_stop_option_validation_and_defaults(self):
+        for options in (
+            ("--rate-limit-stop", "after-pair"),
+            ("--rate-limit-stop", "immediate"),
+            ("--execution-policy", "paired-cautious", "--rate-limit-stop", "invalid"),
+            ("--execution-policy", "paired-cautious", "--rate-limit-stop", "after-pair"),
+            ("--execution-policy", "paired-cautious", "--rate-limit-stop", "after-pair",
+             "--trials", 2, "--control", "always"),
+            ("--execution-policy", "paired-cautious", "--rate-limit-stop", "after-pair",
+             "--trials", 2, "--control-scope", "trial"),
+        ):
+            with self.subTest(options=options):
+                status, rows, _ = self.run_scan(*options, input_path=self.temp / "nonexistent.txt")
+                self.assertEqual(status, 2)
+                self.assertEqual(rows, [])
+                self.assertEqual(self.calls(), [])
+        for output in ("text", "jsonl"):
+            result = subprocess.run(
+                [str(SCANNER), "--format", output, "--rate-limit-stop", "after-pair", str(self.input)],
+                env=self.environment, capture_output=True, check=False, timeout=5,
+            )
+            self.assertEqual(result.returncode, 1)
+            self.assertEqual(self.calls(), [])
+        for options, value in (
+            ([], None),
+            (["--execution-policy", "paired-cautious"], "immediate"),
+            (["--execution-policy", "paired-cautious", "--rate-limit-stop", "immediate"], "immediate"),
+        ):
+            with self.subTest(options=options):
+                self.clear_logs()
+                status, rows, error = self.run_scan(
+                    *options, plan={"https://alpha.example.test": [{"code": 429}]},
+                )
+                self.assertEqual(status, 0 if value is None else 3, error)
+                self.assertEqual(rows[0]["settings"]["rate_limit_stop"], value)
+                self.assertEqual(len(self.calls()), 5 if value is None else 2)
+
     def test_cautious_validation_before_input_and_unnecessary_controls(self):
         status, rows, error = self.run_scan(
             "--execution-policy", "invalid", input_path=self.temp / "nonexistent.txt"
@@ -1714,6 +2044,168 @@ class MeasurementTests(unittest.TestCase):
             )
         self.assert_no_owned_children()
         self.assert_clean()
+
+
+class OnionEvidenceTests(unittest.TestCase):
+    url = "https://alpha.example.test/"
+    host = "a" * 56 + ".onion"
+    other_host = "b" * 56 + ".onion"
+
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory(prefix="check-tor-onion-tests-")
+        self.addCleanup(directory.cleanup)
+        self.directory = Path(directory.name)
+
+    def evidence(self, headers, *, source=None, raw=None, **native):
+        from check_tor_onion import onion_advertisement_evidence
+
+        path = self.directory / "headers"
+        if headers is None and raw is None:
+            path.unlink(missing_ok=True)
+        else:
+            path.write_bytes(raw if raw is not None else b"HTTP/2 200\r\n" + headers + b"\r\n")
+        initial = source or self.url
+        result = dict(http_status=200, redirect_count=0, final_url=initial)
+        result.update(native)
+        return onion_advertisement_evidence(self.directory, initial, result)
+
+    def test_onion_origin_redaction_and_source_context(self):
+        for source, https, onion in (
+            (self.url, True, False), ("http://alpha.example.test/", False, False),
+            ("https://" + self.host.upper() + "./", True, True),
+        ):
+            with self.subTest(source=source):
+                headers = (
+                    "oNiOn-LoCaTiOn: HTTP://sentinel-user:sentinel-pass@"
+                    + self.host.upper()
+                    + ".:00080/sentinel-path?sentinel-query#sentinel-fragment\r\n"
+                    + "Set-Cookie: sentinel-cookie\r\n"
+                )
+                evidence = self.evidence(headers.encode(), source=source)
+                self.assertEqual(evidence["source"], {"https": https, "onion_hostname": onion})
+                self.assertEqual(evidence["onion_location"], {
+                    "state": "available", "origin": "http://" + self.host + ":80",
+                    "omitted_components": ["userinfo", "path", "query", "fragment"],
+                })
+                self.assertEqual(evidence["alt_svc"], {"state": "absent", "reason": "field_absent"})
+                self.assertNotIn("sentinel-", json.dumps(evidence))
+
+    def test_duplicate_conflicting_and_invalid_onion_location(self):
+        location = ("https://sub." + self.host).encode()
+        for second in (location, ("http://" + self.other_host).encode()):
+            evidence = self.evidence(b"Onion-Location: " + location + b"\r\nOnion-Location: " + second + b"\r\n")
+            self.assertEqual(evidence["onion_location"], {"state": "invalid", "reason": "duplicate_fields"})
+        for value in (
+            b"", b"//" + self.host.encode(), b"ftp://" + self.host.encode(), b"https://short.onion/",
+            location + b":0", location + b":65536", location + b"@example.test",
+            location + b"/p%xy", location + b"/p\tq", location + b"/bad#first#second",
+            location + b"/\xff",
+        ):
+            with self.subTest(value=value):
+                evidence = self.evidence(b"Onion-Location: " + value + b"\r\n")
+                self.assertEqual(evidence["onion_location"], {"state": "invalid", "reason": "invalid_onion_url"})
+                self.assertEqual(evidence["alt_svc"]["state"], "absent")
+
+    def test_alt_svc_list_order_deduplication_and_allowlist(self):
+        headers = (
+            f'aLt-SvC: h3="other.example.test:443", h2="{self.host.upper()}.:00443";'
+            f' note="sentinel-quoted, h2=not-an-entry", h2=":8443"\r\n'
+            f'Alt-Svc: h2="{self.host}:443", h2="{self.other_host}:8443", '
+            f'h%2F="{self.host}:444"\r\n'
+        )
+        evidence = self.evidence(headers.encode())
+        self.assertEqual(evidence["alt_svc"], {"state": "available", "entries": [
+            {"protocol": "h2", "authority": self.host + ":443"},
+            {"protocol": "h2", "authority": self.other_host + ":8443"},
+            {"protocol": "h%2F", "authority": self.host + ":444"},
+        ]})
+        self.assertNotIn("sentinel-", json.dumps(evidence))
+        for raw, reason in ((b"clear", "clear"), (b'h2=":443", h3="[::1]:443"', "no_onion_authority")):
+            evidence = self.evidence(b"Alt-Svc: " + raw + b"\r\n")
+            self.assertEqual(evidence["alt_svc"], {"state": "absent", "reason": reason})
+        for raw in (
+            f'clear, h2="{self.host}:443"', 'h2="short.onion:443"',
+            f'h2="{self.host}:0"', f'h2="{self.host}:65536"', f'h2="{self.host}:443/path"',
+            f'h2="sentinel-user@{self.host}:443"', f'h2={self.host}:443',
+            f'h2="{self.host}:443"; note="unterminated', f'%68="{self.host}:443"',
+            f'h%2f="{self.host}:443"', f'h2="{self.host}:443", ',
+        ):
+            with self.subTest(raw=raw):
+                evidence = self.evidence(("Alt-Svc: " + raw + "\r\n").encode())
+                self.assertEqual(evidence["alt_svc"]["state"], "invalid")
+                self.assertNotIn("entries", evidence["alt_svc"])
+                self.assertEqual(evidence["onion_location"]["state"], "absent")
+
+    def test_alt_svc_opaque_quoted_parameters_are_discarded(self):
+        for parameter in (b"\xff", b"\\\xff", b"synthetic-private\x80"):
+            with self.subTest(parameter=parameter):
+                header = b'Alt-Svc: h2="' + self.host.encode() + b':443"; note="' + parameter + b'"\r\n'
+                evidence = self.evidence(header)
+                self.assertEqual(evidence["alt_svc"], {"state": "available", "entries": [
+                    {"protocol": "h2", "authority": self.host + ":443"},
+                ]})
+                self.assertNotIn("synthetic-private", json.dumps(evidence))
+                self.assertNotIn("\\u00", json.dumps(evidence))
+        for header in (b'Alt-Svc: h\xff=":443"\r\n', b'Alt-Svc: h2="\xff:443"\r\n',
+                       b'Alt-Svc: h2=":443"; note=\xff\r\n'):
+            self.assertEqual(self.evidence(header)["alt_svc"]["state"], "invalid")
+
+    def test_resolved_intermediate_url_is_bounded(self):
+        raw = b"".join(
+            b"HTTP/1.1 302 Found\r\nLocation: " + location + b"\r\n\r\n"
+            for location in (b"/" + b"a" * 4500 + b"/", b"b" * 4500 + b"/", b"/end")
+        )
+        raw += b"HTTP/1.1 200 OK\r\nOnion-Location: http://" + self.host.encode() + b"\r\n\r\n"
+        evidence = self.evidence(None, raw=raw, redirect_count=3, final_url=self.url + "end")
+        self.assertIsNone(evidence["source"])
+        self.assertEqual(evidence["onion_location"], {
+            "state": "unavailable", "reason": "redirect_chain_unavailable",
+        })
+
+    def test_capture_and_field_bounds(self):
+        from check_tor_onion import BOUNDS
+
+        for raw, native, expected in (
+            (None, {}, ("unavailable", "headers_unavailable")),
+            (b"HTTP/2 200\r\nAlt-Svc:", {}, ("unavailable", "incomplete_final_block")),
+            (b"HTTP/2 200\r\n\r\n", {"http_status": None}, ("unavailable", "native_status_unavailable")),
+            (b"HTTP/2 200\r\n\r\n", {"http_status": 302}, ("invalid", "final_status_mismatch")),
+            (b"HTTP/2 200\r\n\r\n", {"final_url": self.url + "wrong"}, ("invalid", "final_url_mismatch")),
+            (b"HTTP/2 200\r\n\r\nHTTP/2 200\r\n\r\n", {}, ("unavailable", "response_count_mismatch")),
+            (b"HTTP/1.1 200 OK\r\n\r\nHTTP/1.1 200 Connection established\r\n\r\n",
+             {}, ("unavailable", "terminal_block_unavailable")),
+            (b"HTTP/2 200\r\nAlt-Svc: a\r\n folded\r\n\r\n", {}, ("invalid", "ambiguous_header_block")),
+            (b"x" * (BOUNDS["header_bytes"] + 1), {}, ("truncated", "header_bytes_limit")),
+            (b"HTTP/2 103\r\n\r\n" * BOUNDS["response_blocks"] + b"HTTP/2 200\r\n\r\n",
+             {}, ("truncated", "response_blocks_limit")),
+            (b"HTTP/2 200\r\n" + b"X: y\r\n" * BOUNDS["header_lines"] + b"\r\n",
+             {}, ("truncated", "header_lines_limit")),
+        ):
+            with self.subTest(expected=expected):
+                evidence = self.evidence(None, raw=raw, **native)
+                self.assertIsNone(evidence["source"])
+                self.assertEqual(evidence["onion_location"], dict(zip(("state", "reason"), expected)))
+                self.assertEqual(evidence["alt_svc"], evidence["onion_location"])
+
+        for headers, reason in (
+            (b"Alt-Svc: clear\r\n" * (BOUNDS["fields_per_type"] + 1), "fields_per_type_limit"),
+            (b"Alt-Svc: " + b"x" * (BOUNDS["value_bytes"] + 1) + b"\r\n", "value_bytes_limit"),
+            (b"Alt-Svc: " + b", ".join([b'h2=":443"'] * (BOUNDS["alt_entries"] + 1)) + b"\r\n", "alt_entries_limit"),
+            (b"Alt-Svc: " + b"x" * (BOUNDS["protocol_bytes"] + 1) + b'=":443"\r\n', "protocol_bytes_limit"),
+        ):
+            with self.subTest(reason=reason):
+                evidence = self.evidence(headers)
+                self.assertEqual(evidence["alt_svc"], {"state": "truncated", "reason": reason})
+                self.assertEqual(evidence["onion_location"]["state"], "absent")
+
+        longest_host = ("c" * 63 + ".") * 3 + self.host
+        self.assertEqual(len(longest_host), 254)
+        longest_host = longest_host[1:]
+        protocol = "x" * BOUNDS["protocol_bytes"]
+        values = ", ".join(f'{protocol}="{longest_host}:{65535 - n}"' for n in range(BOUNDS["alt_entries"]))
+        evidence = self.evidence((f"Alt-Svc: {values}\r\nOnion-Location: https://{longest_host}\r\n").encode())
+        self.assertEqual(len(evidence["alt_svc"]["entries"]), BOUNDS["alt_entries"])
+        self.assertLessEqual(len(json.dumps(evidence, ensure_ascii=True).encode()), BOUNDS["evidence_bytes"])
 
 
 if __name__ == "__main__":

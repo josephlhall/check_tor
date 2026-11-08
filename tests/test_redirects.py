@@ -158,6 +158,32 @@ class RedirectTests(unittest.TestCase):
                                "--control-scope=trial")
         self.assertEqual(len(ends), 2)  # fixed trials survive, conditional controls do not
 
+    def test_onion_advertisements_come_only_from_the_terminal_contact(self):
+        host = measurement.OnionEvidenceTests.host
+        other = measurement.OnionEvidenceTests.other_host
+        prefix = (f"HTTP/1.1 200 Connection established\r\nOnion-Location: http://{other}\r\n\r\n"
+                  f'HTTP/1.1 103 Early Hints\r\nAlt-Svc: h2="{other}:443"\r\n\r\n')
+        for limit, with_advertisements, state in (
+            (0, True, "available"), (1, True, "available"), (1, False, "absent"),
+        ):
+            with self.subTest(limit=limit, with_advertisements=with_advertisements):
+                rows, ends, contacts = self.scan({
+                    A: {"code": 302, "location": B, "prefix": prefix,
+                        "headers": f"Onion-Location: http://{other}\r\n"},
+                    B: {"code": 200, "headers": f"Onion-Location: https://{host}\r\n"
+                        if with_advertisements else ""},
+                }, "--max-redirects", limit)
+                end, = ends
+                self.assertEqual(contacts[0]["contacts"], [A, B] if limit else [A])
+                self.assertEqual(end["verdict"], "PASS" if limit else "WARN")
+                self.assertEqual(end["final_url"], B if limit else A)
+                evidence = end["onion_advertisements"]
+                self.assertEqual(evidence["onion_location"]["state"], state)
+                if state == "available":
+                    self.assertEqual(evidence["onion_location"]["origin"], "https://" + host if limit else "http://" + other)
+                self.assertEqual(evidence["alt_svc"]["state"], "absent")
+                self.assertEqual(len(self.fixture.calls()), 2)
+
     def test_redirect_userinfo_and_private_headers_never_exported(self):
         secret_url = "https://synthetic-user:synthetic-password@b.example.test/"
         stopped = "https://:synthetic-next-secret@c.example.test/?q=public#fragment"
@@ -287,6 +313,9 @@ class RedirectTests(unittest.TestCase):
                 self.send_response(code)
                 if location is not None:
                     self.send_header("Location", location)
+                onion = (measurement.OnionEvidenceTests.host if self.path == "/start"
+                         else measurement.OnionEvidenceTests.other_host)
+                self.send_header("Onion-Location", "http://" + onion + "/synthetic-path")
                 self.send_header("Content-Length", "0")
                 self.end_headers()
 
@@ -349,6 +378,17 @@ class RedirectTests(unittest.TestCase):
                 self.assertEqual(result["curl_exit"], 47, result)
                 self.assertEqual(contacts, visited)
                 evidence = SUBJECT.redirect_evidence(directory, initial, result)
+                advertisements = SUBJECT.onion_advertisement_evidence(directory, initial, result)
+                if limit == 1 and location.startswith("///"):
+                    self.assertEqual(advertisements["onion_location"]["state"], "unavailable")
+                else:
+                    onion = (measurement.OnionEvidenceTests.other_host if limit
+                             else measurement.OnionEvidenceTests.host)
+                    self.assertEqual(advertisements["source"], {"https": False, "onion_hostname": False})
+                    self.assertEqual(advertisements["onion_location"], {
+                        "state": "available", "origin": "http://" + onion,
+                        "omitted_components": ["path"],
+                    })
                 if "\t" in location:
                     self.assertIn("\t", result["next_redirect_url"])
                     self.assertIsNone(evidence["next_destination"])

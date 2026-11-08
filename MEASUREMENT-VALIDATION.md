@@ -160,7 +160,12 @@ partners and omits further work for an input hostname after an explicit HTTP
 or replacement trials. Detailed records distinguish a shortened schedule from
 full coverage and scanner failure. Bounded `Retry-After` evidence records
 server metadata with explicit clock limitations; it cannot establish when
-access will succeed. Offline tests establish this policy's software behavior,
+access will succeed. For fixed always-controlled trials, the optional
+`--rate-limit-stop after-pair` preserves the triggering comparison by allowing
+only its unissued partner. Record that choice when describing a schedule.
+The partner may start before the advised delay elapses, and a different route
+does not establish a separate limit. Keep suppressed later observations
+separate from a permitted partner that failed to complete. Offline tests establish this policy's software behavior,
 not its calibration against browser access.
 
 ## Optional detailed scanner observations
@@ -172,6 +177,16 @@ its fixed-trial, control-order, routing, concurrency, and pacing policies.
 The existing text and JSONL v1 interfaces and default stopping rules remain
 available. Neither the new format nor its scheduling options amend frozen
 `TACP-0.2` or retroactively add evidence to the completed pilot.
+
+Detailed target observations can retain `Onion-Location` origins and onion
+`Alt-Svc` transport advertisements from the final response on either route.
+Use the source flags and evidence states to distinguish the two mechanisms
+and separate absent evidence from failed or ambiguous capture. These fields
+describe what a server advertised during the observed request. They cannot
+establish how Tor Browser would handle the advertisement or whether the
+advertised service works. The scanner does not follow advertisements or
+inspect HTML for onion discovery. Older records without the evidence field
+did not collect it.
 
 Fixed trials retain successful as well as unsuccessful observations. They do
 not make repeated requests statistically independent. Paired paths are

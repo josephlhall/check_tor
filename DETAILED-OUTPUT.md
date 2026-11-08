@@ -52,6 +52,7 @@ preserving the configured TLS trust settings.
 | `--order counterbalanced --seed N` | Choose reproducible order independently of outcomes, circuit tags, and worker completion order. Requires always-controls. |
 | `--max-partner-gap S` | Mark a pair late if the start times of its two probes are more than S seconds apart. Accepts positive seconds up to 3600, default 60. Requires trial-scoped controls when set explicitly. |
 | `--execution-policy legacy\|paired-cautious` | Default `legacy`. `paired-cautious` prioritizes ready pair partners and stops an input hostname after explicit HTTP 429. |
+| `--rate-limit-stop immediate\|after-pair` | Requires `paired-cautious`. Default `immediate`. `after-pair` also requires fixed trials, `--control always`, and `--control-scope trial`. |
 | `--workers N` | At most N active target bundles, from 1 to 32; default 1. |
 | `--start-gap S` | Global minimum interval between coordinator probe invocations, in seconds, from 0 to 3600; default 0. |
 | `--run-id TEXT`, `--group-id TEXT` | Optional labels for your analysis. Join records by the scanner's generated execution ID. |
@@ -154,7 +155,7 @@ The principal machine fields are:
 | `run_start` | `settings` (including `request_profile`), `scanner`, `clocks`, and `planned`. |
 | Target-related records | `target_id`, `target_occurrence`, `bundle_id`, `original_input`, and `url`. |
 | `attempt_start` / `attempt_end` | `attempt_id`, `phase`, `route`, `global_order`, `bundle_order`, `trial_id`, `pair_id`, `pairing_state`, `routing`, `requested_timeout`, `started_at`, and `adapter_started`. |
-| `attempt_end` | `ended_at`, `duration_seconds`, `status`, `complete`, `verdict`, `detail`, `http_status`, `curl_exit`, `curl_error`, `final_url`, `redirect_count`, `body_limited`, `tor_verified`, and `local_error`; target observations may also include `stop_reason` and `redirect_evidence`. |
+| `attempt_end` | `ended_at`, `duration_seconds`, `status`, `complete`, `verdict`, `detail`, `http_status`, `curl_exit`, `curl_error`, `final_url`, `redirect_count`, `body_limited`, `tor_verified`, and `local_error`; target observations also include `onion_advertisements` and may include `stop_reason`, `retry_after`, and `redirect_evidence`. |
 | `pair_end` | `attempt_ids` keyed by route, `observed_start_gap_seconds`, `late`, `state`, `missing_routes`, and `aborted_routes`. |
 | `bundle_end` | `state`, `attempts_issued`, and `attempts_completed`. |
 | `run_end` | `state`, `complete`, `exit_code`, `duration_seconds`, `counts` split into preflight/target issued/completed, `target_states`, `verdict_counts`, and nullable `error`. |
@@ -274,16 +275,32 @@ this to other hostnames or providers. HTTP 503, response body text, certificate
 failures, and timeouts do not trigger the stop. Unrelated hostnames continue.
 Missing or bad retry metadata cannot prevent a 429 stop.
 
-A completed 429 remains a complete native observation. A suppressed partner is
-missing, not aborted, and has no invented attempt ID. A shortened bundle stays
-`partial`; a suppressed occurrence that never starts stays `not_started`.
+With `--rate-limit-stop after-pair`, the stop still latches on the first 429.
+Only the unissued opposite route of its preplanned pair and input occurrence
+can start after that stop. If the partner already ran, no further request is
+permitted. The permitted partner retains ordinary priority, pacing, timeout,
+and redirect settings. Its own 429 remains a separate observation with its
+own `retry_after` and cannot grant another exception. This bounded measurement
+choice can start a partner before a received `Retry-After` interval elapses.
+HTTP does not guarantee that a request on another route is exempt.
+See [RFC 6585 §4](https://www.rfc-editor.org/rfc/rfc6585.html#section-4) and
+[RFC 9110 §10.2.3](https://www.rfc-editor.org/rfc/rfc9110.html#section-10.2.3).
+
+A pair is complete if both observations completed, including two HTTP 429s.
+A suppressed partner is missing and has no attempt ID. A permitted partner
+that fails to complete is unresolved. Its attempt or pair records and the
+terminal state identify whether it never started, failed, or was aborted.
+A shortened bundle stays `partial`. A suppressed occurrence that never starts
+stays `not_started`.
 
 The policy records bounded omission descriptions tied to the triggering
 attempt. Known-required requests are distinguished from future controls/retry
 opportunities whose eligibility was never determined. Planned request counts
 remain upper bounds; subtracting issued requests does not count actual skipped
 requests. Three always-controlled pairs stopped on their first Tor request
-have one issued/completed request and five known-required omissions.
+have one issued/completed request and five known-required omissions under
+`immediate`. Under `after-pair`, a completed partner raises the
+issued/completed count to two and leaves four known-required omissions.
 
 | Invocation outcome | `state` | `complete` | Exit code |
 | --- | --- | --- | --- |
@@ -318,7 +335,9 @@ an earlier attempt succeeded. Failures and signals retain their significance.
 
 | Record | Additional fields |
 | --- | --- |
-| `hostname_stop` | Normalized `hostname`, `triggering_attempt_id`, `triggering_target_id`, `route`, `http_status`. Emitted even if nothing remains to omit. |
+| `run_start.settings` | `rate_limit_stop` is `"immediate"` or `"after-pair"` under `paired-cautious`, and `null` under `legacy`. Older records omit it and used immediate stopping under `paired-cautious`. |
+| `hostname_stop` | Normalized `hostname`, `triggering_attempt_id`, `triggering_target_id`, `route`, `http_status`. Emitted even if nothing remains to omit. In `after-pair`, also includes `triggering_pair_id` and nullable `permitted_partner_route` (`"tor"` or `"direct"` when eligible). |
+| `attempt_start` / `attempt_end` | Optional `rate_limit_trigger_attempt_id` identifies an attempted launch under that permission. Join with `hostname_stop` and `pair_end` within the execution. `adapter_started: false` indicates a failed launch. If no partner attempt was logged, use the missing pair and terminal record. |
 | `target_omission` | Target identity, stop reason/trigger fields, and compact `known_required` / `eligibility_undetermined` lists. |
 | `pair_end` | `missing_reason` identifies the hostname stop when it withheld a partner. |
 | `bundle_end` | Optional `omission` retains that target's stop and omission description. |
@@ -369,6 +388,84 @@ serialized bytes. URL comparison is bounded to 8192 UTF-8 bytes. The effective
 bounds are recorded in `settings.retry_after_bounds`. Interim, CONNECT, earlier
 redirect, and unvisited response metadata cannot supply the final retry value.
 Header files remain private and are removed with the observation directory.
+
+## Passive onion advertisements
+
+`attempt_end.onion_advertisements` is additive in JSONL v2. It applies to
+target attempts on both routes, independent of execution policy. Preflight,
+text, and JSONL v1 omit it. In older v2 records, an omitted field means the
+scanner did not collect this evidence. A present field with an `absent` state
+means the scanner associated the response and found no matching advertisement
+of that type.
+
+The object has three keys.
+
+| Key | Value |
+| --- | --- |
+| `source` | `{"https": boolean, "onion_hostname": boolean}` for the response identified by the attempt's `final_url` and `http_status`. `onion_hostname` checks the hostname's `.onion` suffix case-insensitively, ignoring trailing dots. Both facts are descriptive. `source` is `null` when the headers cannot be associated with that response. |
+| `onion_location` | If `state` is `"available"`, also contains `origin` and `omitted_components`. The origin contains the lowercase scheme and hostname and the explicit decimal port, when present. The array lists present components discarded from the URL, in order from `userinfo`, `path`, `query`, and `fragment`. Treat the origin as discovery evidence rather than a navigable counterpart URL. |
+| `alt_svc` | If `state` is `"available"`, also contains ordered `entries`, each with `protocol` and `authority`. The protocol is the advertised ALPN token. The authority is a lowercase onion hostname and decimal port. Identical normalized protocol/authority pairs appear once. |
+
+For either advertisement, states other than `available` contain only
+`state` and `reason`.
+
+| State | Meaning and possible reasons |
+| --- | --- |
+| `absent` | `field_absent` if the header was missing. Alt-Svc can also report `clear` for a lone clear directive or `no_onion_authority` for a list without an explicit onion authority. |
+| `invalid` | The advertisement or its association was malformed or ambiguous. Reasons are `duplicate_fields`, `invalid_onion_url`, `invalid_alt_svc`, `invalid_onion_authority`, `malformed_response_block`, `malformed_header_block`, `ambiguous_header_block`, `final_status_mismatch`, `redirect_chain_ambiguous`, and `final_url_mismatch`. |
+| `truncated` | The scanner withheld evidence after hitting a bound. Reasons are `header_bytes_limit`, `response_blocks_limit`, `header_lines_limit`, `fields_per_type_limit`, `value_bytes_limit`, `alt_entries_limit`, `protocol_bytes_limit`, and `evidence_bytes_limit`. |
+| `unavailable` | Capture or association was insufficient. Reasons are `native_status_unavailable`, `native_redirect_count`, `native_url_unavailable`, `headers_unavailable`, `incomplete_final_block`, `terminal_block_unavailable`, `response_count_mismatch`, and `redirect_chain_unavailable`. |
+
+Association requires a complete terminal HTTP response block and agreement with
+curl's effective URL, status (200–599), and redirect count. It skips interim
+responses and recognizable HTTP/1.x CONNECT success blocks. A redirect at
+the follow limit can itself be the terminal response. Headers from earlier
+redirects and inferred or unvisited destinations cannot supply evidence.
+Unrecognized proxy blocks or ambiguous redirects can prevent association.
+Curl's appended HTTP trailers also cause this version to withhold evidence
+with `incomplete_final_block`, even when the initial headers were complete.
+A capture failure leaves the attempt's native verdict and completion intact.
+
+The parser matches header names case-insensitively. It accepts a single ASCII
+absolute HTTP(S) Onion-Location URL with valid component characters and percent
+escapes. Repeated fields are ambiguous even when their values match. Alt-Svc
+accepts comma-separated alternatives across fields, with RFC 7838 ALPN tokens,
+quoted authorities, and syntactically checked parameters. Authority escapes,
+empty list members, and a mixture of `clear` and alternatives are rejected.
+Only explicit onion hosts are retained. Hostless alternatives and other hosts
+can be parsed but supply no onion authority. Quoted parameter values may
+contain opaque non-ASCII bytes. Parameter values are discarded.
+A malformed member invalidates the list rather than exposing a partial set.
+
+Both types require a 56-character base32 label immediately before `.onion`,
+with optional DNS subdomains and a single optional trailing dot. Hostnames
+are limited to 253 characters excluding the root dot. Explicit ports are
+1–65535, written with up to five decimal digits in the header. The parser
+does not verify the onion address checksum, embedded version byte, service
+identity, browser acceptance, or reachability. For Onion-Location, use the
+source flags to evaluate the Tor Project's HTTPS and non-onion source rules.
+An advertised Alt-Svc endpoint is an alternate transport for the original
+origin and may serve no independent website.
+See the [Tor Project Onion-Location guide](https://community.torproject.org/onion-services/advanced/onion-location/),
+[the Tor address specification](https://spec.torproject.org/address-spec),
+[RFC 7838 §3](https://www.rfc-editor.org/rfc/rfc7838.html#section-3), and
+[Cloudflare's onion routing documentation](https://developers.cloudflare.com/network/onion-routing/).
+
+`run_start.settings.onion_advertisement_bounds` records the following limits.
+
+| Keys | Limits |
+| --- | --- |
+| `header_bytes`, `response_blocks`, `header_lines` | 262144 bytes of the captured header sequence, 256 blocks, and 4096 lines including status lines. |
+| `url_bytes`, `redirects` | 8192 UTF-8 bytes per URL used for association and 100 followed redirects. |
+| `fields_per_type`, `value_bytes` | Eight fields per type and 4096 bytes per trimmed field value. |
+| `alt_entries`, `protocol_bytes` | Eight alternatives examined across fields, including duplicates and non-onion entries, and 64 ASCII bytes per ALPN token. |
+| `evidence_bytes` | 4096 serialized JSON bytes for the whole object. |
+
+The scanner reads headers from its existing probe scratch files. This
+collection does not inspect HTML or change redirects, classifications, or
+request counts. The scanner does not navigate to advertised services or
+enable Alt-Svc use. Raw advertisement values, unrelated headers, parameters,
+cookies, and response bodies are excluded from the evidence object.
 
 ## Failure, interruption, and sensitive data
 
