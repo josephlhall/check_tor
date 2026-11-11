@@ -116,7 +116,7 @@ body = response.get("body", "")
 if response.get("body_bytes"):
     body = "x" * response["body_bytes"]
 if url == "https://check.torproject.org/api/ip":
-    body = '{"IsTor":' + ("false" if response.get("fail") else "true") + ',"IP":"192.0.2.123"}'
+    body = '{"IsTor":' + ("false" if response.get("fail") else "true") + ',"IP":"192.0.2.123"}' + body
 headers = chain_headers if chain_headers is not None else "HTTP/2 " + str(code) + "\r\n" + response.get("headers", "") + "\r\n"
 if "-D" in args:
     Path(args[args.index("-D") + 1]).write_text(headers)
@@ -1077,6 +1077,7 @@ class MeasurementTests(unittest.TestCase):
 
     def test_curl_write_error_is_local_unless_body_cap_was_reached(self):
         status, rows, error = self.run_scan(
+            "--max-body-bytes=512KiB",
             "--trials",
             2,
             "--control",
@@ -1106,11 +1107,12 @@ class MeasurementTests(unittest.TestCase):
         self.assert_clean()
         self.clear_logs()
         status, rows, error = self.run_scan(
+            "--max-body-bytes=512KiB",
             "--control",
             "never",
             targets=["alpha.example.test"],
             plan={
-                "https://alpha.example.test": [{"exit": 23, "body_bytes": 1024 * 1024}]
+                "https://alpha.example.test": [{"exit": 23, "body_bytes": 512 * 1024}]
             },
         )
         self.assertEqual(status, 0, error)
@@ -1269,10 +1271,79 @@ class MeasurementTests(unittest.TestCase):
             }
         )
         self.assertEqual(status, 0, error)
+        self.assertEqual(rows[0]["settings"]["request_profile"]["max_body_bytes"], 1048576)
         ends = self.select(rows, "attempt_end", "target")
         self.assertEqual(len(ends), 1)
         self.assertEqual(ends[0]["verdict"], "WARN")
         self.assertIs(ends[0]["body_limited"], True)
+        self.assert_clean()
+
+    def test_invalid_body_limits_never_launch_preflight(self):
+        for value in ("", "0", "-1", "1.5MiB", "1MB", "10485761", "11MiB", "9" * 25):
+            with self.subTest(value=value):
+                status, rows, error = self.run_scan("--max-body-bytes=" + value)
+                self.assertEqual(status, 2, error)
+                self.assertIn("--max-body-bytes", error)
+                self.assertEqual(rows, [])
+        status, rows, error = self.run_scan("--max-body-bytes", "--")
+        self.assertEqual(status, 2, error)
+        self.assertIn("expected one argument", error)
+        self.assertEqual(rows, [])
+        self.assertEqual(self.calls(), [])
+        self.assert_clean()
+
+    def test_body_limit_reaches_both_routes_and_repeated_trials_on_active_workers(self):
+        targets = ["alpha.example.test", "beta.example.test"]
+        release = self.temp / "body-limit-workers-ready"
+        response = {"body_bytes": 2 * 1024 * 1024, "release_file": str(release)}
+        process = self.spawn(
+            "--max-body-bytes", "10mib",
+            "--workers", 2,
+            "--trials", 2,
+            "--control", "always",
+            "--control-scope", "trial",
+            targets=targets,
+            plan={"https://" + target: [response] for target in targets},
+        )
+        try:
+            self.wait_for_calls(3, process)  # Both workers reach curl before either is released.
+        finally:
+            release.touch()
+        stdout, error = process.communicate(timeout=20)
+        self.assertEqual(process.returncode, 0, error)
+        rows = self.parse(stdout)
+        self.assertEqual(rows[0]["settings"]["request_profile"]["max_body_bytes"], 10485760)
+        attempts = self.select(rows, "attempt_end", "target")
+        self.assertEqual(len(attempts), 8)
+        for route in ("tor", "direct"):
+            self.assertEqual(sum(row["route"] == route for row in attempts), 4)
+        for attempt in attempts:
+            self.assertEqual(attempt["verdict"], "PASS")
+            self.assertIs(attempt["body_limited"], False)
+        self.assert_accounting(rows)
+        self.assert_clean()
+
+    def test_preflight_uses_a_fixed_body_limit(self):
+        status, rows, error = self.run_scan("--max-body-bytes=1")
+        self.assertEqual(status, 0, error)
+        self.assertEqual(rows[0]["settings"]["request_profile"]["max_body_bytes"], 1)
+        preflight = self.select(rows, "attempt_end", "preflight")[0]
+        self.assertIs(preflight["tor_verified"], True)
+        self.assertIs(preflight["body_limited"], False)
+        self.assert_clean()
+
+        self.clear_logs()
+        status, rows, error = self.run_scan(
+            "--max-body-bytes=10485760",
+            plan={"preflight": [{"body_bytes": 1048576}]},
+        )
+        self.assertNotEqual(status, 0, error)
+        self.assertEqual([call["url"] for call in self.calls()], [PREFLIGHT])
+        preflight = self.select(rows, "attempt_end", "preflight")[0]
+        self.assertIs(preflight["tor_verified"], False)
+        self.assertIs(preflight["body_limited"], True)
+        self.assertIsNone(preflight["local_error"])
+        self.assert_accounting(rows)
         self.assert_clean()
 
     def test_redirect_userinfo_is_never_stored(self):

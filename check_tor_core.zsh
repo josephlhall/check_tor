@@ -2,6 +2,8 @@
 # Callers provide probe_* globals and BODY/LASTH response paths; the offline
 # suites supply fixtures through the same interface.
 
+DEFAULT_BODY_BYTES=1048576
+
 # grep's exit 1 means no match; any other failure makes classification
 # unavailable. Keep this flag in the caller shell rather than in a pipeline or
 # command substitution, so v2 cannot mistake a failed inspection for a PASS.
@@ -69,7 +71,10 @@ classify() {
     # an HTTP status or write error. Treating partial content as authoritative
     # could create a false block or trigger misleading Tor/clearnet retries.
     if (( ${probe_body_limited:-0} )); then
-        verdict=WARN detail="response body reached the 1 MiB inspection limit"
+        local limit=${MAX_BODY_BYTES:-$DEFAULT_BODY_BYTES} limit_label
+        limit_label="$limit byte"
+        (( limit == DEFAULT_BODY_BYTES )) && limit_label="1 MiB"
+        verdict=WARN detail="response body reached the $limit_label inspection limit"
         return
     fi
     case $probe_exit in

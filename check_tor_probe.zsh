@@ -10,6 +10,10 @@ if [[ -n ${CHECK_TOR_MAX_REDIRECTS:-} ]]; then
     parse_bounded_integer "$CHECK_TOR_MAX_REDIRECTS" --max-redirects 100 0 || exit 70
     MAX_REDIRECTS=$REPLY
 fi
+if (( ${+CHECK_TOR_MAX_BODY_BYTES} )); then
+    parse_bounded_integer "$CHECK_TOR_MAX_BODY_BYTES" --max-body-bytes "$MAX_SUPPORTED_BODY_BYTES" || exit 70
+    MAX_BODY_BYTES=$REPLY
+fi
 if [[ ${1:-} == --settings && $# == 1 ]]; then
     json_quote "$USER_AGENT"; ua=$REPLY
     json_quote "$ACCEPT_HDR"; accept=$REPLY
@@ -60,13 +64,13 @@ if [[ $phase == preflight ]]; then
     # private sink prevents retaining an unlimited unexpected response.
     typeset -a preflight_via=()
     [[ $reproducible == 1 ]] && preflight_via=(--noproxy '')
-    probe_curl -q -s --socks5-hostname "$TOR_PROXY" --max-time "$PREFLIGHT_TIMEOUT" \
+    metadata=$(probe_curl -q -s -o >(probe_body_sink "$PREFLIGHT_BODY_BYTES") \
+        --socks5-hostname "$TOR_PROXY" --max-time "$PREFLIGHT_TIMEOUT" \
         "${preflight_via[@]}" \
-        -w $'\nCHECK_TOR_META\t%{http_code}\t%{num_redirects}\t%{url_effective}\t%{errormsg}' \
-        https://check.torproject.org/api/ip > >(probe_body_sink) 2>/dev/null
+        -w $'CHECK_TOR_META\t%{http_code}\t%{num_redirects}\t%{url_effective}\t%{errormsg}' \
+        https://check.torproject.org/api/ip 2>/dev/null)
     probe_read_status
     probe_code=000 probe_redirs='' probe_final='' probe_err=''
-    metadata=${${(f)"$(<"$BODY")"}[-1]}
     if [[ $metadata == CHECK_TOR_META$'\t'* ]]; then
         typeset -a metadata_fields=("${(@ps:\t:)metadata}")
         probe_code=${metadata_fields[2]:-000}
@@ -74,16 +78,10 @@ if [[ $phase == preflight ]]; then
         probe_final=${metadata_fields[4]:-}
         (( ${#metadata_fields} >= 5 )) && probe_err="${(pj:\t:)metadata_fields[5,-1]}"
     fi
+    probe_measure_body "$PREFLIGHT_BODY_BYTES"
     verified=false
-    [[ $(<"$BODY") == *'"IsTor":true'* ]] && verified=true
-    body_bytes=$(wc -c < "$BODY") || { probe_local_failure=1; body_bytes=""; }
-    body_bytes=${body_bytes//[[:space:]]/}
-    probe_body_limited=0
-    if [[ $body_bytes == <-> ]]; then
-        probe_body_limited_known=1
-        probe_body_limited=$(( body_bytes >= MAX_BODY_BYTES ))
-    else
-        probe_local_failure=1 probe_body_limited_known=0
+    if (( ! probe_local_failure && ! probe_body_limited )) && [[ $(<"$BODY") == *'"IsTor":true'* ]]; then
+        verified=true
     fi
 else
     probe "$url" "$tag" "$timeout"

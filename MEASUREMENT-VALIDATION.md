@@ -214,6 +214,16 @@ limit prospectively for new studies. Synthetic offline chain/contact tests
 establish software behavior only; they add no live findings or evidence to
 frozen protocols or completed pilots.
 
+For new studies, choose the target response-body cap prospectively and keep
+it consistent across Tor and direct observations. Detailed runs record it in
+`settings.request_profile.max_body_bytes`. The default is 1 MiB
+(1,048,576 bytes), and `--max-body-bytes 10MiB` permits up to 10,485,760
+bytes per response. A response that reaches the cap is inconclusive because
+uninspected content could change the classification. Raising the cap may
+change verdicts and use more time and temporary storage per active probe.
+Request timeouts and the independent 1 MiB preflight cap still apply. A
+successful curl retrieval alone does not establish browser usability.
+
 Bounded workers share Tor and network capacity. Global pacing controls the
 coordinator's top-level probe invocations, including preflight; it does not
 bound redirect hops, packet starts, or aggregate traffic to a provider reached

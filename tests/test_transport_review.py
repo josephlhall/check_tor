@@ -1,10 +1,13 @@
 """Offline regressions for literal URLs and unavailable response inspection."""
 
+import http.server
 import json
 import os
 import shutil
+import socketserver
 import subprocess
 import sys
+import threading
 import unittest
 
 import test_measurement as measurement
@@ -88,6 +91,70 @@ class TransportReviewTests(unittest.TestCase):
                     self.assertEqual(call["args"][0], "-q")
                 fixture.assert_accounting(rows)
                 fixture.assert_clean()
+
+    def test_real_curl_body_limit_with_known_length_and_chunked_responses(self):
+        class Handler(http.server.BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1"
+
+            def do_GET(self):
+                _, encoding, size = self.path.split("/")
+                remaining = int(size)
+                chunked = encoding == "chunked"
+                self.send_response(200)
+                self.send_header("Connection", "close")
+                if chunked:
+                    self.send_header("Transfer-Encoding", "chunked")
+                else:
+                    self.send_header("Content-Length", size)
+                self.end_headers()
+                block = b"x" * 65536
+                try:
+                    while remaining:
+                        payload = block[:remaining]
+                        if chunked:
+                            self.wfile.write(b"%x\r\n" % len(payload) + payload + b"\r\n")
+                        else:
+                            self.wfile.write(payload)
+                        remaining -= len(payload)
+                    if chunked:
+                        self.wfile.write(b"0\r\n\r\n")
+                except (BrokenPipeError, ConnectionResetError):
+                    pass  # Curl may close the connection when the sink reaches its cap.
+
+            def log_message(self, *args):
+                pass
+
+        server = socketserver.TCPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.01})
+        thread.start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(thread.join, 2)
+        self.addCleanup(server.shutdown)
+        port = server.server_address[1]
+        request = self.fixture.temp / "native-body-probe"
+        request.mkdir()
+        cap = 10 * 1024 * 1024
+        env = dict(os.environ, CHECK_TOR_MAX_BODY_BYTES=str(cap))
+        for encoding in ("length", "chunked"):
+            for size in (cap - 1, cap, cap + 65536):
+                with self.subTest(encoding=encoding, size=size):
+                    result = subprocess.run(
+                        [shutil.which("zsh"), str(measurement.ROOT / "check_tor_probe.zsh"),
+                         str(request), "direct", f"http://127.0.0.1:{port}/{encoding}/{size}",
+                         "5", "1", "target"],
+                        env=env, capture_output=True, text=True, timeout=10,
+                    )
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    observation = json.loads(result.stdout)
+                    self.assertEqual(observation["http_status"], 200)
+                    self.assertIsNone(observation["local_error"])
+                    self.assertEqual(observation["verdict"], "WARN" if size >= cap else "PASS")
+                    self.assertIs(observation["body_limited"], size >= cap)
+                    self.assertEqual((request / "body").stat().st_size, min(size, cap))
+                    self.assertEqual(
+                        {path.name for path in request.iterdir()},
+                        {"body", "headers", "last_headers"},
+                    )
 
     def test_classifier_grep_errors_preserve_facts_and_stop_schedule(self):
         fixture = self.fixture

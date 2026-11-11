@@ -110,7 +110,7 @@ The scanner recognizes response signatures such as Cloudflare error codes and
 challenge markers and headers associated with Akamai, Sucuri, and
 Imperva/Incapsula. These markers can help identify the infrastructure serving
 the final response. Responsibility for the site's policy requires separate
-evidence. When a response body reaches the 1 MiB inspection limit, the scanner
+evidence. When a response body reaches the inspection limit, the scanner
 reports `WARN` because later content may change how the response is understood.
 
 ## Options and output formats
@@ -124,6 +124,7 @@ scan. The following options apply to ordinary scans and detailed measurements.
 | `--proxy HOST:PORT` | `localhost:9050` | Tor SOCKS endpoint. Use brackets around an IPv6 literal. |
 | `--circuits N` | `3` | Maximum Tor attempts for failure-driven retries, from 1 to 100. |
 | `--max-redirects N` | `10` | Redirects curl may follow per Tor or comparison probe, from 0 to 100. |
+| `--max-body-bytes SIZE` | `1MiB` | Maximum bytes retained from each target response on either route, from 1 byte through 10 MiB. |
 | `--timeout-first N` | `60` | First Tor attempt's timeout in seconds, from 1 to 3600. |
 | `--timeout-retry N` | `30` | Later Tor attempts' timeout in seconds, from 1 to 3600. |
 | `--timeout-clearnet N` | `20` | Comparison request's timeout in seconds, from 1 to 3600. |
@@ -136,6 +137,17 @@ subsequent access unobserved. A terminal response within the budget keeps
 its normal classification. Reaching the limit triggers neither a failure
 retry nor a conditional comparison. Explicit fixed trials and always-controls
 in detailed mode still apply. The Tor preflight never follows redirects.
+
+Use `--max-body-bytes 10MiB` to inspect larger responses. Supply a whole
+number of bytes (for example, `10485760`) or attach a case-insensitive
+`KiB` or `MiB` suffix, as in `512KiB`. One KiB is 1,024 bytes and one MiB
+is 1,048,576 bytes. The scanner applies the cap separately to each Tor and
+direct target probe, including repeated trials. Reaching it is inconclusive
+even when curl reports HTTP 200. Larger caps can increase download and
+inspection time and temporary disk use, especially with concurrent workers.
+Request timeouts still apply. Tor preflight has its own fixed 1 MiB cap and
+fails verification if it reaches that cap. Successful HTTP retrieval alone
+does not establish browser usability.
 
 ### Text and JSON Lines v1
 
@@ -249,8 +261,9 @@ roadmap](MEASUREMENT-VALIDATION.md) for methods, limits, and follow-up.
 Run the offline checks from the repository root with Zsh, curl, and
 Python 3.9 or newer. The local TLS tests also need the `openssl` command to
 generate temporary test certificates; it is not a scanner dependency. The
-tests use synthetic targets and temporary files. The redirect and TLS suites
-open loopback connections. No Tor process or Internet access is needed.
+tests use synthetic targets and temporary files. The transport, redirect, and
+TLS suites open loopback connections. No Tor process or Internet access is
+needed.
 
 ```zsh
 (
