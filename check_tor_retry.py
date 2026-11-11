@@ -198,6 +198,8 @@ def terminal_response_fields(directory, initial_url, result, wanted):
     if not raw:
         return None, dict(state="unavailable", reason="headers_unavailable")
     parts = re.split(rb"\r?\n\r?\n", raw)
+    # Curl can append trailers after the terminal header block. Without a final
+    # blank line, this parser cannot attribute the trailing bytes to a response.
     if parts[-1]:
         return None, dict(state="unavailable", reason="incomplete_final_block")
     if len(parts) - 1 > BOUNDS["response_blocks"]:

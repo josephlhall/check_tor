@@ -70,6 +70,8 @@ def _onion_location(values):
     origin = parsed.scheme.lower() + "://" + host
     if port is not None:
         origin += ":" + str(port)
+    # Inspect the original delimiters so even empty query and fragment
+    # components count as omitted. Export only their names.
     before_fragment, fragment, _ = value.partition("#")
     omitted = [
         name for name, present in (
