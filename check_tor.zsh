@@ -36,12 +36,14 @@ TIMEOUT_CLEARNET=20   # control request without Tor
 # underlying verdict from the automated Tor probes.
 CLEARNET_ENABLED=1
 
-# Retain at most 1 MiB of each response body. WAF fingerprints are normally
-# near the start of an error page; accepting this finite prefix prevents an
-# untrusted or endless response from consuming disk until the time limit. A
+# Retain at most 1 MiB of each target response body by default. WAF fingerprints
+# are normally near the start of an error page. Taking only a finite prefix
+# prevents an untrusted or endless response from consuming disk until timeout. A
 # fingerprint beyond the prefix can be missed, so reaching the cap is reported
 # as inconclusive rather than as evidence that the site blocks Tor.
-MAX_BODY_BYTES=$(( 1024 * 1024 ))
+MAX_BODY_BYTES=$DEFAULT_BODY_BYTES
+MAX_SUPPORTED_BODY_BYTES=10485760
+PREFLIGHT_BODY_BYTES=1048576
 MAX_REDIRECTS=10
 PREFLIGHT_TIMEOUT=10
 
@@ -158,6 +160,8 @@ usage() {
     print -r -- "  --proxy HOST:PORT         Tor SOCKS proxy (default: localhost:9050)."
     print -r -- "  --circuits COUNT          Maximum Tor attempts, 1–100 (default: 3)."
     print -r -- "  --max-redirects COUNT     Redirects followed, 0–100 (default: 10); initial request is not counted."
+    print -r -- "  --max-body-bytes SIZE     Target response limit, 1 byte–10 MiB (default: 1 MiB)."
+    print -r -- "    Use whole bytes or a case-insensitive KiB/MiB suffix, e.g. 512KiB or 10MiB."
     print -r -- "  --timeout-first SECONDS   First Tor attempt, 1–3600 (default: 60)."
     print -r -- "  --timeout-retry SECONDS   Later Tor attempts, 1–3600 (default: 30)."
     print -r -- "  --timeout-clearnet SECONDS  Clearnet control, 1–3600 (default: 20)."
@@ -181,6 +185,7 @@ usage() {
     print -r -- "    Default: immediate. after-pair requires fixed trials and always-on trial controls."
     print -r -- ""
     print -r -- "Redirect-limit stops leave subsequent access unobserved; preflight follows no redirects."
+    print -r -- "Preflight has a separate, fixed 1 MiB body limit."
     print -r -- "jsonl-v2 adds bounded hop evidence; see DETAILED-OUTPUT.md for limits and privacy."
     print -r -- "Text and JSONL v1 retain their output contracts."
     print -r -- ""
@@ -209,6 +214,24 @@ parse_bounded_integer() {
         return 1
     fi
     REPLY=$value
+}
+
+parse_body_limit() {
+    local value=${(L)1} multiplier=1
+    case $value in
+        *kib) value=${value%kib} multiplier=1024 ;;
+        *mib) value=${value%mib} multiplier=1048576 ;;
+    esac
+    # Bound the digit count before arithmetic, including multiplication.
+    if [[ $value == <-> ]] && (( ${#value} <= 8 )); then
+        value=$(( 10#$value * multiplier ))
+        if (( value >= 1 && value <= MAX_SUPPORTED_BODY_BYTES )); then
+            REPLY=$value
+            return 0
+        fi
+    fi
+    print -u2 -r -- "Error: --max-body-bytes requires a whole number of bytes or a KiB/MiB suffix, from 1 byte to 10 MiB (e.g. 10MiB)."
+    return 1
 }
 
 validate_proxy() {
@@ -264,7 +287,7 @@ probe_curl() {
 
 probe_body_sink() {
     local sink_result
-    head -c "$MAX_BODY_BYTES" > "$BODY"
+    head -c "$1" > "$BODY"
     sink_result=$?
     print -r -- "$sink_result" > "$BODY.sink-status" || return 70
     return "$sink_result"
@@ -281,6 +304,22 @@ probe_read_status() {
         probe_local_failure=1
     fi
     rm -f "$BODY.curl-status" "$BODY.sink-status" || probe_local_failure=1
+}
+
+probe_measure_body() {
+    local body_bytes
+    probe_body_limited=0 probe_body_limited_known=0
+    if ! body_bytes=$(wc -c < "$BODY"); then
+        probe_local_failure=1
+        return
+    fi
+    body_bytes=${body_bytes//[[:space:]]/}
+    if [[ $body_bytes == <-> ]]; then
+        probe_body_limited_known=1
+        probe_body_limited=$(( body_bytes >= $1 ))
+    else
+        probe_local_failure=1
+    fi
 }
 
 # probe <url> <circuit-tag|""> <timeout>
@@ -322,26 +361,14 @@ probe() {
     # A shell-function invocation waits for its process substitutions in Zsh.
     # Without this wrapper, curl can exit before head has finished writing BODY,
     # leaving classification and the body-cap check racing that final write.
-    out=$(probe_curl -q -s -o >(probe_body_sink) \
+    out=$(probe_curl -q -s -o >(probe_body_sink "$MAX_BODY_BYTES") \
         -D "$HDRS" -L --max-redirs "$MAX_REDIRECTS" \
         -A "$USER_AGENT" -H "$ACCEPT_HDR" -H "$LANG_HDR" \
         "${via[@]}" --max-time "$3" \
         -w '%{http_code}\t%{num_redirects}\t%{time_appconnect}\t%{url_effective}\t%{errormsg}\nCHECK_TOR_NEXT_URL\n%{redirect_url}\nCHECK_TOR_NEXT_END' \
         "$1" 2>/dev/null)
     probe_read_status
-    local body_bytes
-    if ! body_bytes=$(wc -c < "$BODY"); then
-        probe_local_failure=1
-        body_bytes=""
-    fi
-    body_bytes=${body_bytes//[[:space:]]/}
-    if [[ $body_bytes == <-> ]]; then
-        probe_body_limited_known=1
-        probe_body_limited=$(( body_bytes >= MAX_BODY_BYTES ))
-    else
-        probe_local_failure=1
-        probe_body_limited_known=0
-    fi
+    probe_measure_body "$MAX_BODY_BYTES"
     # IFS treats tabs as whitespace and collapses empty columns. Preserve them
     # so unavailable TLS/final-URL metadata cannot shift a diagnostic into a URL.
     # A hostile Location may contain tabs even when curl stops at the limit.
@@ -379,7 +406,7 @@ probe() {
 parse_args() {
     local output_format=text target_file="" argument
     local proxy=$TOR_PROXY circuits=$MAX_CIRCUITS
-    local max_redirects=$MAX_REDIRECTS
+    local max_redirects=$MAX_REDIRECTS max_body_bytes=$MAX_BODY_BYTES
     local timeout_first=$TIMEOUT_FIRST timeout_retry=$TIMEOUT_RETRY
     local timeout_clearnet=$TIMEOUT_CLEARNET clearnet_enabled=$CLEARNET_ENABLED
     REPLY="" reply=()
@@ -400,6 +427,15 @@ parse_args() {
                 output_format=$1
                 ;;
             --format=*) output_format=${argument#*=} ;;
+            --max-body-bytes|--max-body-bytes=*)
+                local body_limit_value=${argument#*=}
+                if [[ $argument == --max-body-bytes ]]; then
+                    shift
+                    body_limit_value=${1:-}
+                fi
+                parse_body_limit "$body_limit_value" || return 1
+                max_body_bytes=$REPLY
+                ;;
             --proxy|--circuits|--max-redirects|--timeout-first|--timeout-retry|--timeout-clearnet)
                 local option_name=$argument
                 shift
@@ -517,7 +553,8 @@ parse_args() {
 
     REPLY=$target_file
     reply=("$target_file" "$output_format" "$proxy" "$circuits" \
-           "$timeout_first" "$timeout_retry" "$timeout_clearnet" "$clearnet_enabled" "$max_redirects")
+           "$timeout_first" "$timeout_retry" "$timeout_clearnet" "$clearnet_enabled" \
+           "$max_redirects" "$max_body_bytes")
 }
 
 load_targets() {
@@ -571,6 +608,8 @@ warn_tracked_input() {
 
 tor_preflight() {
     local tor_check exit_ip
+    local probe_local_failure=0 probe_body_limited probe_body_limited_known
+    local probe_exit probe_exit_known
 
     if [[ ${OUTPUT_FORMAT:-text} == text ]]; then
         echo "${BLD}check_tor${OFF} · https://github.com/josephlhall/check_tor"
@@ -578,9 +617,14 @@ tor_preflight() {
     fi
     # This checks more than whether a SOCKS port accepts connections: Tor's service
     # confirms that the request emerged from its network and reports the exit IP.
-    tor_check=$(curl -q -s --socks5-hostname "$TOR_PROXY" --max-time "$PREFLIGHT_TIMEOUT" https://check.torproject.org/api/ip)
-
-    if [[ "$tor_check" == *'"IsTor":true'* ]]; then
+    probe_curl -q -s --socks5-hostname "$TOR_PROXY" --max-time "$PREFLIGHT_TIMEOUT" \
+        https://check.torproject.org/api/ip > >(probe_body_sink "$PREFLIGHT_BODY_BYTES")
+    probe_read_status
+    probe_measure_body "$PREFLIGHT_BODY_BYTES"
+    if (( ! probe_local_failure && ! probe_body_limited )); then
+        tor_check=$(<"$BODY")
+    fi
+    if [[ ${tor_check:-} == *'"IsTor":true'* ]]; then
         exit_ip=${tor_check#*\"IP\":\"} exit_ip=${exit_ip%%\"*}
         [[ ${OUTPUT_FORMAT:-text} == text ]] && \
             echo "[${GRN}SUCCESS${OFF}] Tor connection verified (current exit: ${exit_ip:-unknown}). Starting scan..."
@@ -770,7 +814,7 @@ main() {
     local OUTPUT_FORMAT=${reply[2]} TOR_PROXY=${reply[3]} MAX_CIRCUITS=${reply[4]}
     local TIMEOUT_FIRST=${reply[5]} TIMEOUT_RETRY=${reply[6]}
     local TIMEOUT_CLEARNET=${reply[7]} CLEARNET_ENABLED=${reply[8]}
-    local MAX_REDIRECTS=${reply[9]}
+    local MAX_REDIRECTS=${reply[9]} MAX_BODY_BYTES=${reply[10]}
 
     load_targets "$target_file" || return 1
     scan_targets=("${reply[@]}")

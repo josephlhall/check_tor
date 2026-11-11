@@ -94,12 +94,22 @@ without a proxy. Explicit trial, control, order, execution policy, worker,
 or pacing options enable this behavior even if you specify a default value.
 Both routing modes keep the configured TLS trust and suppress `.curlrc`.
 
-Detailed mode uses curl's TLS and HTTP behavior, the scanner's fixed headers
-and body cap, and the selected redirect limit. It disables curl URL globbing
+Detailed mode uses curl's TLS and HTTP behavior, the scanner's fixed headers,
+and the selected body and redirect limits. It disables curl URL globbing
 so braces and ranges in one input stay part of a single URL. SOCKS usernames
 request circuit isolation, but different circuits can share an exit. Treat
 the measurements as repeated curl observations. A browser may get a
 different response or do more with the same response.
+
+`settings.request_profile.max_body_bytes` records the effective per-response
+target cap as an integer byte count. It applies to every Tor and direct
+target probe, including repeated trials and concurrent workers. The default
+is 1,048,576 bytes (1 MiB). `--max-body-bytes 10MiB` selects the maximum of
+10,485,760 bytes. Larger limits can use more temporary disk space per active
+probe and increase download and inspection time. Configured curl request
+timeouts still apply.
+At the cap, the attempt reports `body_limited: true` and `stop_reason:
+"body_limit"` for an inconclusive target observation.
 
 ## Records and identity
 
@@ -119,6 +129,8 @@ The lifecycle consists of `run_start`, `bundle_start`, `attempt_start`,
 `attempt_end`, `pair_end` where applicable, `bundle_end`, and `run_end`.
 Preflight is an attempt with a separate phase, not a target or trial. Its Tor
 verification result is retained without its response body or exit IP.
+Preflight uses a fixed 1 MiB body limit independent of the target cap. A
+preflight response that reaches the cap fails verification.
 
 Attempt records include the original input and normalized URL, requested
 route and routing assurance, actual issue order, timeout, UTC timestamps,

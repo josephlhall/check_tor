@@ -33,6 +33,8 @@ SCHEMA = 2
 BLOCKY = {"FAIL", "CHALLENGE", "RATELIMIT", "DROP", "TIMEOUT", "SOCKS"}
 VERDICTS = BLOCKY | {"PASS", "CERT", "WARN"}
 MAX_RESULT_BYTES = 131072
+DEFAULT_BODY_BYTES = 1048576
+MAX_SUPPORTED_BODY_BYTES = 10485760
 # These are retained metadata bounds, independent of curl's follow budget.
 # Read private headers only here, before their request directory is removed.
 MAX_REDIRECT_HEADER_BYTES = 262144
@@ -70,6 +72,18 @@ def bounded_int(maximum, minimum=1):
     return parse
 
 
+def body_limit(value):
+    match = re.fullmatch(r"([0-9]{1,8})(kib|mib)?", value.lower())
+    if match:
+        multiplier = {None: 1, "kib": 1024, "mib": 1048576}[match[2]]
+        size = int(match[1]) * multiplier
+        if 1 <= size <= MAX_SUPPORTED_BODY_BYTES:
+            return size
+    raise argparse.ArgumentTypeError(
+        "expected whole bytes or a KiB/MiB suffix, from 1 byte to 10 MiB (e.g. 10MiB)"
+    )
+
+
 def gap(value):
     try:
         result = float(value)
@@ -91,6 +105,14 @@ def arguments(argv):
     p.add_argument("--proxy", default="localhost:9050")
     p.add_argument("--circuits", type=bounded_int(100), default=3)
     p.add_argument("--max-redirects", type=bounded_int(100, 0), default=10)
+    p.add_argument(
+        "--max-body-bytes",
+        type=body_limit,
+        default=DEFAULT_BODY_BYTES,
+        metavar="SIZE",
+        help="target response limit, 1 byte to 10 MiB (default: 1 MiB). "
+        "Use whole bytes or a case-insensitive KiB/MiB suffix, e.g. 512KiB or 10MiB.",
+    )
     p.add_argument("--timeout-first", type=bounded_int(3600), default=60)
     p.add_argument("--timeout-retry", type=bounded_int(3600), default=30)
     p.add_argument("--timeout-clearnet", type=bounded_int(3600), default=20)
@@ -602,6 +624,7 @@ class Engine:
             }
         self.env["CHECK_TOR_PROXY"] = args.proxy
         self.env["CHECK_TOR_MAX_REDIRECTS"] = str(args.max_redirects)
+        self.env["CHECK_TOR_MAX_BODY_BYTES"] = str(args.max_body_bytes)
         # Alter stdout only after other initialization succeeds; run() always
         # restores its original flags, including when main was called by Zsh.
         self.writer = Writer(

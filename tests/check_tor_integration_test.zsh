@@ -80,6 +80,9 @@ if [[ "$url" == "https://check.torproject.org/api/ip" ]]; then
         print -r -- '{"IsTor":false}'
     else
         print -r -- '{"IsTor":true,"IP":"192.0.2.10"}'
+        if [[ "$CHECK_TOR_FAKE_SCENARIO" == preflight_oversized ]]; then
+            printf '%*s' 2097152 ''
+        fi
     fi
     exit 0
 fi
@@ -97,7 +100,7 @@ case $CHECK_TOR_FAKE_SCENARIO in
     retry_then_pass)
         (( probe_number == 1 )) && code=403
         ;;
-    persistent_tor_block)
+    persistent_tor_block|large_control)
         [[ -n "$proxy_user" ]] && code=403
         ;;
     inconclusive_control)
@@ -106,6 +109,9 @@ case $CHECK_TOR_FAKE_SCENARIO in
     oversized_body)
         code=403
         ;;
+    large_success)
+        code=200
+        ;;
     *)
         print -u2 -- "Unknown fake curl scenario: $CHECK_TOR_FAKE_SCENARIO"
         exit 2
@@ -113,11 +119,11 @@ case $CHECK_TOR_FAKE_SCENARIO in
 esac
 
 print -r -- "HTTP/2 $code" > "$header_file"
-if [[ "$CHECK_TOR_FAKE_SCENARIO" == oversized_body ]]; then
+if [[ "$CHECK_TOR_FAKE_SCENARIO" == (oversized_body|large_success) ||
+      ( "$CHECK_TOR_FAKE_SCENARIO" == large_control && -z "$proxy_user" ) ]]; then
     # Write well beyond the scanner's cap. Its byte-counting output sink must
     # stop this synthetic chunked/unknown-size response at the finite limit.
     printf '%*s' 2097152 '' > "$body_file"
-    printf '%s\t0\t0.1\t%s\t\n' "$code" "$url"
 elif (( code == 403 )); then
     print -r -- "error code: 1020" > "$body_file"
 else
@@ -176,7 +182,7 @@ assert_eq "source stderr" "" "$(< "$source_case/stderr")"
 assert_eq "source preserves caller arguments and trap" \
     "2:caller-argument:second-argument" "$(< "$source_case/caller-trap")"
 assert_eq "source callable boundaries" \
-    "$source_case/targets.txt:jsonl,localhost:9050,3,60,30,20,1,10:\"quote\\\" slash\\\\ tab\\u0009 line\\u000a\":alpha.example.test,beta.example.test" \
+    "$source_case/targets.txt:jsonl,localhost:9050,3,60,30,20,1,10,1048576:\"quote\\\" slash\\\\ tab\\u0009 line\\u000a\":alpha.example.test,beta.example.test" \
     "$(< "$source_case/function-result")"
 assert_eq "source curl calls" "" "$(< "$source_case/curl.log")"
 assert_eq "source temporary files" 0 "$(find "$source_case/scanner-tmp" -type f | wc -l | tr -d ' ')"
@@ -281,15 +287,26 @@ for invalid_setting in \
     '--circuits=0' \
     '--circuits=101' \
     '--circuits=three' \
+    '--max-body-bytes' \
+    '--max-body-bytes=' \
+    '--max-body-bytes=0' \
+    '--max-body-bytes=-1' \
+    '--max-body-bytes=1MB' \
+    '--max-body-bytes=1.5MiB' \
+    '--max-body-bytes=10485761' \
+    '--max-body-bytes=11MiB' \
+    '--max-body-bytes=99999999999999999999MiB' \
     '--timeout-first=0' \
     '--timeout-retry=3601' \
     '--timeout-clearnet=slow'
 do
     setting_name=${invalid_setting%%=*}
     setting_value=${invalid_setting#*=}
+    setting_args=("$invalid_setting")
+    [[ $invalid_setting == --max-body-bytes ]] || setting_args+=("$TEST_TMP/absent.txt")
     set +e
     CHECK_TOR_FAKE_LOG="$cli_case/curl.log" PATH="$FAKE_BIN:/usr/bin:/bin" \
-        "$REPO_ROOT/check_tor.zsh" "$invalid_setting" "$TEST_TMP/absent.txt" \
+        "$REPO_ROOT/check_tor.zsh" "${setting_args[@]}" \
         > "$cli_case/setting.out" 2> "$cli_case/setting.err"
     setting_status=$?
     set -e
@@ -478,6 +495,29 @@ assert_contains "JSONL explicit body cutoff" '"body_limited":true' "$scanner_std
 assert_contains "JSONL cutoff has no control" \
     '"clearnet_control":{"enabled":true,"performed":false,"verdict":null}' "$scanner_stdout"
 assert_contains "JSONL cutoff is not Tor-specific" '"tor_specific":null' "$scanner_stdout"
+
+run_scanner large_success "$oversized_case/targets.txt" "$oversized_case" jsonl --max-body-bytes 10MiB
+assert_eq "10 MiB permits a 2 MiB response" 0 "$scanner_status"
+assert_contains "large complete response passes" '"verdict":"PASS"' "$scanner_stdout"
+assert_contains "large complete response is not capped" '"body_limited":false' "$scanner_stdout"
+run_scanner large_control "$oversized_case/targets.txt" "$oversized_case" jsonl --circuits=1
+assert_contains "default cap makes large direct control inconclusive" \
+    '"clearnet_control":{"enabled":true,"performed":true,"verdict":"WARN"}' "$scanner_stdout"
+run_scanner large_control "$oversized_case/targets.txt" "$oversized_case" jsonl --circuits=1 --max-body-bytes 10MiB
+assert_contains "large direct control passes under override" \
+    '"clearnet_control":{"enabled":true,"performed":true,"verdict":"PASS"}' "$scanner_stdout"
+run_scanner large_success "$oversized_case/targets.txt" "$oversized_case" jsonl --max-body-bytes=512kib
+assert_eq "512 KiB scan succeeds with cutoff" 0 "$scanner_status"
+assert_contains "512 KiB response is capped" '"body_limited":true' "$scanner_stdout"
+assert_contains "custom cap detail reports bytes" "524288 byte inspection limit" "$scanner_stdout"
+run_scanner all_pass "$oversized_case/targets.txt" "$oversized_case" jsonl --max-body-bytes=1
+assert_eq "one-byte target cap leaves normal preflight alone" 0 "$scanner_status"
+assert_contains "one-byte setting reaches target" '"verdict":"PASS"' "$scanner_stdout"
+run_scanner preflight_oversized "$oversized_case/targets.txt" "$oversized_case" jsonl --max-body-bytes=10485760
+assert_eq "oversized ordinary preflight fails at fixed cap" 1 "$scanner_status"
+assert_eq "capped ordinary preflight never probes targets" 1 "$(wc -l < "$oversized_case/curl.log" | tr -d ' ')"
+assert_eq "configured limit temporary cleanup" 0 \
+    "$(find "$oversized_case/scanner-tmp" -type f | wc -l | tr -d ' ')"
 
 # Preflight failures preserve normal progress on stdout and diagnose the fatal
 # condition on stderr.
