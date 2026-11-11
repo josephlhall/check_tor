@@ -126,9 +126,11 @@ Record the lifecycle state, visibility, who controls the endpoint, authorization
 publication sensitivity, evidence for the expected instrument behavior,
 stability, whether previous requests or session state can affect later results,
 interaction limit, verification method and date, owner and contact, and what
-would retire the entry. The condition IDs are
-planning labels. `HTTPBIN-LINKS-2` is the only existing eligible catalog
-entry. Assign new endpoints a verified state only after verifying them.
+would retire the entry. The condition IDs are planning labels.
+`HTTPBIN-LINKS-2` is the only existing catalog entry proposed for these
+conditions. Its documented purpose was verified for the dry run. Recheck
+that evidence and obtain approval for the specific batch through
+[issue #41](https://github.com/josephlhall/check_tor/issues/41).
 
 ## Approved planning shape and traffic accounting
 
