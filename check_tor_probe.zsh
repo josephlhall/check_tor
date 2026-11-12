@@ -70,19 +70,20 @@ if [[ $phase == preflight ]]; then
         -w $'CHECK_TOR_META\t%{http_code}\t%{num_redirects}\t%{url_effective}\t%{errormsg}' \
         https://check.torproject.org/api/ip 2>/dev/null)
     probe_read_status
-    probe_code=000 probe_redirs='' probe_final='' probe_err=''
+    probe_code='' probe_redirs='' probe_final='' probe_err=''
     if [[ $metadata == CHECK_TOR_META$'\t'* ]]; then
         typeset -a metadata_fields=("${(@ps:\t:)metadata}")
-        probe_code=${metadata_fields[2]:-000}
+        if [[ $metadata == CHECK_TOR_META$'\t'[0-9][0-9][0-9]$'\t'* ]]; then
+            probe_code=$metadata_fields[2]
+        fi
         probe_redirs=${metadata_fields[3]:-}
         probe_final=${metadata_fields[4]:-}
         (( ${#metadata_fields} >= 5 )) && probe_err="${(pj:\t:)metadata_fields[5,-1]}"
     fi
     probe_measure_body "$PREFLIGHT_BODY_BYTES"
     verified=false
-    if (( ! probe_local_failure && ! probe_body_limited )) && [[ $(<"$BODY") == *'"IsTor":true'* ]]; then
-        verified=true
-    fi
+    # The coordinator validates the private JSON body after successful transport.
+    # A partial response containing IsTor:true cannot authorize target traffic.
 else
     probe "$url" "$tag" "$timeout"
     [[ -n $tag ]] && probe_err=${probe_err//$tag/[redacted]}
@@ -103,7 +104,13 @@ elif ! check_local_transport; then
 fi
 code=null redirs=null final=null next=null next_truncated=false err=null limited=false transport_exit=null
 (( probe_exit_known )) && transport_exit=$probe_exit
-[[ $probe_code == <-> && $probe_code != 000 ]] && code=$(( 10#$probe_code ))
+# The private preflight protocol preserves an explicit 000 as zero. The
+# coordinator uses it for retry eligibility and exports it as null in JSONL.
+if [[ $phase == preflight && $probe_code == 000 ]]; then
+    code=0
+elif [[ $probe_code == <-> && $probe_code != 000 ]]; then
+    code=$(( 10#$probe_code ))
+fi
 [[ $probe_redirs == <-> ]] && redirs=$(( 10#$probe_redirs ))
 [[ -n $probe_final ]] && { json_quote "$probe_final"; final=$REPLY; }
 # Bound this new private metadata value before JSON escaping. Python applies

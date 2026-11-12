@@ -62,7 +62,8 @@ number = sum(call["url"] == url and call["route"] == route for call in previous)
 responses = plan.get(url + "|" + route, plan.get(url, [{}]))
 response = responses[min(number, len(responses)-1)]
 if url == "https://check.torproject.org/api/ip":
-    response = plan.get("preflight", [{}])[0]
+    responses = plan.get("preflight", [{}])
+    response = responses[min(number, len(responses)-1)]
 # Python 3.9 on macOS gives time.monotonic() a process-local epoch. Tests
 # compare different fake-curl processes, so use the shared POSIX clock.
 record = {"pid": os.getpid(), "url": url, "route": route,
@@ -115,7 +116,7 @@ code = response.get("code", 200)
 body = response.get("body", "")
 if response.get("body_bytes"):
     body = "x" * response["body_bytes"]
-if url == "https://check.torproject.org/api/ip":
+if url == "https://check.torproject.org/api/ip" and not response.get("raw_body"):
     body = '{"IsTor":' + ("false" if response.get("fail") else "true") + ',"IP":"192.0.2.123"}' + body
 headers = chain_headers if chain_headers is not None else "HTTP/2 " + str(code) + "\r\n" + response.get("headers", "") + "\r\n"
 if "-D" in args:
@@ -661,6 +662,28 @@ class MeasurementTests(unittest.TestCase):
         )
         self.assertTrue(any(call["proxy_env"]["HTTPS_PROXY"] for call in self.calls()))
 
+    def test_preflight_retry_option_preserves_inherited_routing(self):
+        environment = {
+            "HTTPS_PROXY": "http://ambient.example.test:9876",
+            "NO_PROXY": "*",
+        }
+        for policy in ("none", "transient"):
+            with self.subTest(policy=policy):
+                self.clear_logs()
+                status, rows, error = self.run_scan(
+                    "--preflight-retry", policy, env=environment
+                )
+                self.assertEqual(status, 0, error)
+                self.assertEqual(rows[0]["settings"]["preflight_retry"], policy)
+                starts = self.select(rows, "attempt_start")
+                self.assertEqual([row["phase"] for row in starts], ["preflight", "target"])
+                for row in starts:
+                    self.assertEqual(row["routing"]["mode"], "inherited_unknown")
+                for call in self.calls():
+                    self.assertNotIn("--noproxy", call["args"])
+                    for key, value in environment.items():
+                        self.assertEqual(call["proxy_env"][key], value)
+
     def test_late_pair_uses_observed_start_gap(self):
         status, rows, error = self.run_scan(
             "--trials",
@@ -808,6 +831,236 @@ class MeasurementTests(unittest.TestCase):
             self.select(rows, "attempt_end", "preflight")[0]["tor_verified"], False
         )
         self.assert_clean()
+
+    def run_preflight_engine(self, plan, *options, cancel_wait=False, cleanup_failure=False):
+        specification = importlib.util.spec_from_file_location(
+            "preflight_subject", ROOT / "check_tor_measure.py"
+        )
+        coordinator = importlib.util.module_from_spec(specification)
+        specification.loader.exec_module(coordinator)
+        records, launches, waits = [], [], []
+        offset = [0.0]
+        monotonic = time.monotonic
+
+        class CaptureWriter:
+            failed = False
+            def __init__(self, common):
+                self.common = common
+            def emit(self, kind, **fields):
+                records.append(dict(self.common, type=kind, **fields))
+            def restore(self):
+                pass
+
+        environment = dict(self.environment, MEASUREMENT_TEST_PLAN=json.dumps(plan))
+        with mock.patch.dict(os.environ, environment), mock.patch.object(coordinator, "Writer", CaptureWriter):
+            engine = coordinator.Engine(
+                coordinator.arguments(["--preflight-retry", "transient", *options, str(self.input)]),
+                coordinator.load_targets(self.input),
+            )
+            read_ready, launch = engine.read_ready, engine.launch
+            def ready(wait=0.02):
+                if engine.active:
+                    return read_ready(wait)
+                waits.append(wait)
+                if cancel_wait:
+                    coordinator.CANCELLED = signal.SIGTERM
+                offset[0] += wait
+                return False
+            def launch_record(bundle=None):
+                issued = launch(bundle)
+                if issued:
+                    launches.append(("target" if bundle else "preflight", engine.last_launch))
+                return issued
+            rmtree = shutil.rmtree
+            def remove(path, *args, **kwargs):
+                if cleanup_failure and Path(path).parent == Path(engine.temp.name) and Path(path).name == "1":
+                    raise OSError("synthetic cleanup failure")
+                return rmtree(path, *args, **kwargs)
+            with mock.patch.object(coordinator.time, "monotonic", lambda: monotonic() + offset[0]), \
+                 mock.patch.object(engine, "read_ready", ready), \
+                 mock.patch.object(engine, "launch", launch_record), \
+                 mock.patch.object(coordinator.shutil, "rmtree", remove):
+                status = engine.run()
+        self.assert_clean()
+        self.assert_no_owned_children()
+        return status, records, launches, waits
+
+    def test_preflight_retry_recovers_and_accounts_each_attempt(self):
+        status, rows, launches, waits = self.run_preflight_engine(
+            {"preflight": [{"exit": 35, "code": "000"}, {}]},
+            "--control", "never", "--start-gap", "20",
+        )
+        self.assertEqual(status, 0)
+        self.assertEqual([phase for phase, _ in launches], ["preflight", "preflight", "target"])
+        self.assertTrue(all(b[1] - a[1] >= 20 for a, b in zip(launches, launches[1:])))
+        preflights = self.select(rows, "attempt_end", "preflight")
+        self.assertEqual([r["tor_verified"] for r in preflights], [False, True])
+        self.assertEqual([r["preflight_retryable"] for r in preflights], [True, False])
+        self.assertEqual([r["preflight_reason"] for r in preflights], ["transport_failure", "verified"])
+        self.assertEqual(len({r["attempt_id"] for r in preflights}), 2)
+        for row in preflights:
+            self.assertTrue(row["started_at"])
+            self.assertTrue(row["ended_at"])
+            self.assertEqual(row["requested_timeout"], 10)
+            self.assertIsNone(row["trial_id"])
+            self.assertIsNone(row["pair_id"])
+        self.assertEqual(rows[0]["planned"]["preflight_requests"], 3)
+        self.assertEqual(rows[0]["settings"]["preflight_retry_delays"], [15, 30])
+        end = self.assert_accounting(rows)
+        self.assertEqual(end["counts"]["preflight"], {"issued": 2, "completed": 2})
+        self.assertEqual(end["verdict_counts"], {"tor": {"PASS": 1}, "direct": {}})
+        self.assertLessEqual(max(waits), 0.02)
+        for call in self.calls()[:2]:
+            self.assertEqual(call["args"][call["args"].index("--max-time") + 1], "10")
+            self.assertIn("--socks5-hostname", call["args"])
+            self.assertNotIn("-k", call["args"])
+
+    def test_preflight_retry_exhausts_with_exact_wait_schedule(self):
+        status, rows, launches, waits = self.run_preflight_engine(
+            {"preflight": [{"exit": 28, "code": "000"}]}
+        )
+        self.assertEqual(status, 1)
+        self.assertEqual([phase for phase, _ in launches], ["preflight"] * 3)
+        ends = self.select(rows, "attempt_end", "preflight")
+        # Backoff starts after completion, independently of the request duration.
+        for index, delay in enumerate((15, 30)):
+            elapsed = launches[index + 1][1] - launches[index][1] - ends[index]["duration_seconds"]
+            self.assertGreaterEqual(elapsed, delay - 0.01)
+            self.assertLess(elapsed, delay + 0.2)
+        end = self.assert_accounting(rows)
+        self.assertEqual(end["counts"]["preflight"], {"issued": 3, "completed": 3})
+        self.assertEqual(end["counts"]["target"], {"issued": 0, "completed": 0})
+        self.assertEqual(end["verdict_counts"], {"tor": {}, "direct": {}})
+
+    def test_preflight_nonretryable_responses_stop_immediately(self):
+        cases = [
+            ({"fail": True}, "not_tor", "complete"),
+            ({"exit": 60, "code": "000"}, "transport_failure", "complete"),
+            ({"exit": 77, "code": "000"}, "local_error", "error"),
+            ({"exit": 23, "code": "000"}, "local_error", "error"),
+            ({"code": 503}, "http_status", "complete"),
+            ({"exit": 28, "code": 200}, "transport_failure", "complete"),
+            ({"exit": 99, "code": "000"}, "transport_failure", "complete"),
+            ({"body_bytes": 1048576}, "body_limit", "complete"),
+        ]
+        for body in ('garbage "IsTor":true', '{"IsTor":true', '{"IsTor":"true"}',
+                     '{"IsTor":true,"IsTor":false}', '{"IsTor":true,"IP":NaN}', '[]', '{"nested":{"IsTor":true}}'):
+            cases.append(({"raw_body": True, "body": body}, "invalid_response", "complete"))
+        for response, reason, expected_status in cases:
+            with self.subTest(response=response):
+                self.clear_logs()
+                status, rows, error = self.run_scan("--preflight-retry", "transient", plan={"preflight": [response, {}]})
+                self.assertEqual(status, 1, error)
+                self.assertEqual(len(self.calls()), 1)
+                preflight = self.select(rows, "attempt_end", "preflight")[0]
+                self.assertFalse(preflight["tor_verified"])
+                self.assertFalse(preflight["preflight_retryable"])
+                self.assertEqual(preflight["preflight_reason"], reason)
+                self.assertEqual(preflight["status"], expected_status)
+                self.assertEqual(self.assert_accounting(rows)["counts"]["target"]["issued"], 0)
+                self.assert_clean()
+
+    def test_preflight_timeout_requires_explicit_no_http_response_to_retry(self):
+        for response in (
+            {"exit": 28, "code": 503, "omit_writeout": True},
+            {"exit": 28, "code": "malformed"},
+        ):
+            with self.subTest(response=response):
+                self.clear_logs()
+                status, rows, launches, waits = self.run_preflight_engine(
+                    {"preflight": [response, {}]}
+                )
+                self.assertEqual(status, 1)
+                self.assertEqual([phase for phase, _ in launches], ["preflight"])
+                self.assertEqual(sum(waits), 0)
+                preflight = self.select(rows, "attempt_end", "preflight")[0]
+                self.assertIs(preflight["complete"], True)
+                self.assertEqual(preflight["curl_exit"], 28)
+                self.assertIsNone(preflight["http_status"])
+                self.assertIs(preflight["preflight_retryable"], False)
+                end = self.assert_accounting(rows)
+                self.assertEqual(end["counts"]["target"]["issued"], 0)
+
+    def test_preflight_default_and_invalid_policy_never_retry(self):
+        status, rows, _ = self.run_scan(plan={"preflight": [{"exit": 35, "code": "000"}, {}]})
+        self.assertEqual(status, 1)
+        self.assertEqual(len(self.calls()), 1)
+        self.assertEqual(rows[0]["planned"]["preflight_requests"], 1)
+        self.assertEqual(rows[0]["settings"]["preflight_retry"], "none")
+        self.assertEqual(rows[0]["settings"]["preflight_retry_delays"], [])
+        self.clear_logs()
+        for option in ("unknown", "3", ""):
+            status, rows, _ = self.run_scan("--preflight-retry", option)
+            self.assertEqual(status, 2)
+            self.assertEqual(rows, [])
+        for output_format in ("text", "jsonl"):
+            result = subprocess.run(
+                ["zsh", str(SCANNER), "--format", output_format, "--preflight-retry", "transient", str(self.input)],
+                env=self.environment, capture_output=True, text=True,
+            )
+            self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.calls(), [])
+
+    def test_preflight_cancel_during_wait_and_cleanup_failure_stop_admission(self):
+        for cancel, cleanup in ((True, False), (False, True)):
+            with self.subTest(cancel=cancel, cleanup=cleanup):
+                self.clear_logs()
+                status, rows, launches, waits = self.run_preflight_engine(
+                    {"preflight": [{"exit": 35, "code": "000"}, {}]},
+                    cancel_wait=cancel, cleanup_failure=cleanup,
+                )
+                self.assertEqual(status, 143 if cancel else 1)
+                self.assertEqual(len(launches), 1)
+                self.assertEqual(self.assert_accounting(rows)["counts"]["target"]["issued"], 0)
+                self.assertEqual(rows[-1]["state"], "interrupted" if cancel else "error")
+                if cleanup:
+                    self.assertEqual(sum(waits), 0)
+
+    def test_default_preflight_cancelled_in_flight_has_unknown_verification(self):
+        process = self.spawn(
+            plan={"preflight": [{"release_file": str(self.temp / "release-preflight")}]}
+        )
+        self.wait_for_calls(1, process)
+        process.send_signal(signal.SIGTERM)
+        stdout, stderr = process.communicate(timeout=5)
+
+        self.assertEqual(process.returncode, 143, stderr)
+        self.assertEqual([call["url"] for call in self.calls()], [PREFLIGHT])
+        rows = self.parse(stdout)
+        preflight = self.select(rows, "attempt_end", "preflight")[0]
+        self.assertEqual(preflight["status"], "aborted")
+        self.assertIs(preflight["complete"], False)
+        self.assertIsNone(preflight["tor_verified"])
+        end = self.assert_accounting(rows)
+        self.assertEqual(end["state"], "interrupted")
+        self.assertEqual(end["counts"]["preflight"], {"issued": 1, "completed": 0})
+        self.assertEqual(end["counts"]["target"]["issued"], 0)
+        self.assert_no_owned_children()
+        self.assert_clean()
+
+    def test_preflight_signal_during_real_retry_wait(self):
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            with self.subTest(signal=sig):
+                self.clear_logs()
+                process = self.spawn("--preflight-retry", "transient", plan={"preflight": [{"exit": 35, "code": "000"}, {}]})
+                prefix = []
+                # attempt_end is emitted after the adapter group has been reaped,
+                # immediately before the interruptible backoff begins.
+                while True:
+                    line = process.stdout.readline()
+                    self.assertTrue(line, "scanner ended before preflight completion")
+                    prefix.append(line)
+                    if json.loads(line)["type"] == "attempt_end":
+                        break
+                process.send_signal(sig)
+                stdout, stderr = process.communicate(timeout=5)
+                rows = self.parse("".join(prefix) + stdout)
+                self.assertEqual(process.returncode, 128 + sig, stderr)
+                self.assertEqual(len(self.calls()), 1)
+                self.assertEqual(self.assert_accounting(rows)["counts"]["target"]["issued"], 0)
+                self.assertEqual(rows[-1]["state"], "interrupted")
+                self.assert_no_owned_children()
+                self.assert_clean()
 
     def test_sigint_stops_issuing_reaps_and_reports_missing_pairs(self):
         self.assert_signal_cancellation(signal.SIGINT)

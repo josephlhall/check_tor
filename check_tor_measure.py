@@ -41,6 +41,10 @@ MAX_REDIRECT_HEADER_BYTES = 262144
 MAX_REDIRECT_HOPS = 100
 MAX_REDIRECT_URL_BYTES = 8192
 MAX_REDIRECT_EVIDENCE_BYTES = 65536
+# Only transport failures without an HTTP response qualify. Certificate,
+# HTTP, local resource, and unknown failures deliberately remain terminal.
+PREFLIGHT_RETRY_EXITS = frozenset({5, 6, 7, 28, 35, 52, 55, 56})
+PREFLIGHT_RETRY_DELAYS = (15, 30)
 CANCELLED = 0
 
 
@@ -117,6 +121,11 @@ def arguments(argv):
     p.add_argument("--timeout-retry", type=bounded_int(3600), default=30)
     p.add_argument("--timeout-clearnet", type=bounded_int(3600), default=20)
     p.add_argument("--no-clearnet", action="store_true")
+    p.add_argument(
+        "--preflight-retry", choices=["none", "transient"], default="none",
+        help="Tor verification policy: none (one attempt) or transient "
+        "(up to three attempts, waiting 15 then 30 seconds)",
+    )
     p.add_argument("--run-id")
     p.add_argument("--group-id")
     p.add_argument("--trials", type=bounded_int(100))
@@ -639,6 +648,7 @@ class Engine:
     def start_record(self):
         names = (
             "proxy",
+            "preflight_retry",
             "circuits",
             "max_redirects",
             "trials",
@@ -657,6 +667,10 @@ class Engine:
             "timeout_clearnet",
         )
         settings = {n: getattr(self.args, n) for n in names}
+        settings["preflight_retry_delays"] = (
+            list(PREFLIGHT_RETRY_DELAYS) if self.args.preflight_retry == "transient" else []
+        )
+        settings["preflight_retry_curl_exits"] = sorted(PREFLIGHT_RETRY_EXITS)
         settings["trial_policy"] = (
             "fixed" if self.args.trials is not None else "failure-retry"
         )
@@ -727,7 +741,7 @@ class Engine:
                 "target_count": len(self.targets),
                 "target_requests_upper_bound": len(self.targets)
                 * (tor_bound + control_bound),
-                "preflight_requests": 1,
+                "preflight_requests": 3 if self.args.preflight_retry == "transient" else 1,
             },
         )
 
@@ -1068,6 +1082,15 @@ class Engine:
                 tor_verified=None,
                 local_error=None,
             )
+        if fields["phase"] == "preflight":
+            self.verify_preflight(result, task["directory"], status)
+            # The adapter's zero distinguishes curl's explicit 000 from
+            # missing write-out. The public status stays null in both cases.
+            if result["http_status"] == 0:
+                result["http_status"] = None
+            if result["local_error"]:
+                status = "error"
+            self.preflight_retryable = result["preflight_retryable"]
         if fields["phase"] == "target":
             result["onion_advertisements"] = onion_advertisement_evidence(
                 task["directory"], fields["url"], result
@@ -1098,7 +1121,7 @@ class Engine:
         process.stdout.close()
         process.wait(timeout=1)
         self.active.pop(process.pid, None)
-        if self.args.rate_limit_stop != "after-pair":
+        if self.args.rate_limit_stop != "after-pair" and bundle is not None:
             shutil.rmtree(task["directory"], ignore_errors=True)
         if bundle:
             bundle.active = None
@@ -1129,9 +1152,9 @@ class Engine:
                     self.apply_hostname_stop(bundle, end)
             else:
                 self.preflight_ok = result["tor_verified"] is True
-        # In after-pair mode, a scratch cleanup fault must stop admission
-        # before the next launch, even if the terminal cleanup can retry it.
-        if self.args.rate_limit_stop == "after-pair":
+        # Preflight and after-pair cleanup faults must stop admission before
+        # the next launch, even if terminal cleanup can retry removal.
+        if self.args.rate_limit_stop == "after-pair" or bundle is None:
             try:
                 shutil.rmtree(task["directory"])
             except OSError as exc:
@@ -1140,6 +1163,77 @@ class Engine:
             not abort or self.args.rate_limit_stop == "after-pair"
         ):
             raise Failure("local adapter/setup failed")
+
+    @staticmethod
+    def verify_preflight(result, directory, status):
+        """Verify complete transport and JSON, never a matching partial body.
+
+        The body stays in the private request directory. Only a bounded reason
+        and eligibility flag enter JSONL; eligibility does not promise a retry.
+        """
+        if status == "complete":
+            result["tor_verified"] = False
+        result["preflight_retryable"] = False
+        if status != "complete" or result["local_error"]:
+            reason = "local_error" if status == "error" else "incomplete"
+        elif result["body_limited"]:
+            reason = "body_limit"
+        elif result["curl_exit"] != 0:
+            reason = "transport_failure"
+            result["preflight_retryable"] = (
+                result["curl_exit"] in PREFLIGHT_RETRY_EXITS
+                and result["http_status"] == 0
+            )
+        elif result["http_status"] not in (None, 200):
+            reason = "http_status"
+        else:
+            # Reject duplicate keys: choosing either conflicting IsTor value
+            # would turn an ambiguous response into an affirmative verification.
+            def unique_object(pairs):
+                value = {}
+                for key, item in pairs:
+                    if key in value:
+                        raise ValueError("duplicate verification key")
+                    value[key] = item
+                return value
+
+            def invalid_constant(value):
+                raise ValueError("non-JSON constant")
+
+            try:
+                with (directory / "body").open("rb") as stream:
+                    body = stream.read(DEFAULT_BODY_BYTES + 1)
+                if len(body) >= DEFAULT_BODY_BYTES:
+                    raise ValueError("verification body exceeds bound")
+                value = json.loads(
+                    body, object_pairs_hook=unique_object, parse_constant=invalid_constant
+                )
+                verified = value.get("IsTor") if isinstance(value, dict) else None
+                if type(verified) is not bool:
+                    raise ValueError("missing boolean verification")
+                result["tor_verified"] = verified
+                reason = "verified" if verified else "not_tor"
+            except (ValueError, UnicodeError, RecursionError):
+                reason = "invalid_response"
+            except OSError:
+                result["local_error"] = "local_verification_read_failed"
+                reason = "local_error"
+        result["preflight_reason"] = reason
+
+    def run_preflight(self):
+        attempts = 3 if self.args.preflight_retry == "transient" else 1
+        for attempt in range(attempts):
+            # launch() enforces the same global start gap used for targets.
+            while not CANCELLED and not self.launch():
+                self.read_ready()
+            while self.active and not CANCELLED:
+                self.read_ready()
+            if CANCELLED or self.preflight_ok or not self.preflight_retryable:
+                return
+            if attempt + 1 < attempts:
+                deadline = time.monotonic() + PREFLIGHT_RETRY_DELAYS[attempt]
+                while not CANCELLED and time.monotonic() < deadline:
+                    self.read_ready(min(0.02, max(0, deadline - time.monotonic())))
 
     def apply_hostname_stop(self, bundle, end):
         host = bundle.target["hostname"]
@@ -1425,11 +1519,10 @@ class Engine:
     def run(self):
         state, code = "complete", 0
         self.preflight_ok = False
+        self.preflight_retryable = False
         try:
             self.start_record()
-            self.launch()
-            while self.active and not CANCELLED:
-                self.read_ready()
+            self.run_preflight()
             if CANCELLED:
                 state, code = "interrupted", 128 + CANCELLED
             elif not self.preflight_ok:

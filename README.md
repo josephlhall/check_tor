@@ -226,6 +226,27 @@ your JSONL v2 reader accepts the new terminal state and exit code.
 See the [detailed output reference](DETAILED-OUTPUT.md) for the scheduling
 options, routing guarantees, record fields, and how to interpret partial runs.
 
+### Retrying Tor verification
+
+Detailed mode normally verifies Tor once before starting targets. Opt in to
+`--format jsonl-v2 --preflight-retry transient` to allow up to three
+verification requests. Eligible transport failures wait 15 seconds before the
+second attempt and 30 seconds before the third; each request retains its
+ten-second timeout and fixed 1 MiB body cap. Global `--start-gap` pacing also
+applies. Targets start only after completed, valid Tor verification.
+
+Curl must explicitly report no HTTP response (`000`) and exit with `5`, `6`,
+`7`, `28`, `35`, `52`, `55`, or `56` for a retry. Failures with missing or
+malformed HTTP write-out stop immediately, as do certificate errors, HTTP
+errors, invalid or non-Tor results, body-cap exhaustion, and local failures. Cancellation
+interrupts waits. The policy applies only to startup verification and uses
+the run's existing proxy settings and certificate checks.
+`--preflight-retry none` selects one attempt. Both values require JSONL v2.
+
+Each issued verification has its own JSONL v2 attempt records. Consumers that
+assume exactly one preflight must support the [opt-in contract
+extension](DETAILED-OUTPUT.md#tor-verification-and-retries) before selecting it.
+
 ## Handling target lists
 
 Keep operational target lists and raw results outside the repository in a

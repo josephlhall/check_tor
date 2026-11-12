@@ -224,6 +224,21 @@ change verdicts and use more time and temporary storage per active probe.
 Request timeouts and the independent 1 MiB preflight cap still apply. A
 successful curl retrieval alone does not establish browser usability.
 
+For new studies, freeze the startup verification policy prospectively.
+Detailed mode defaults to one attempt; `--preflight-retry transient` allows
+three attempts with 15- and 30-second waits after eligible transport failures,
+while retaining ten-second timeouts, the independent 1 MiB cap, and global
+pacing. It requires completed successful Tor verification before any target
+work. The [finite retry policy and output contract](DETAILED-OUTPUT.md#tor-verification-and-retries)
+exclude HTTP, certificate, invalid/non-Tor response, body-cap, and local
+failures. Each preflight is recorded separately from target denominators;
+planned preflight counts are upper bounds, while terminal counts report actual
+issued and completed observations. Retrying startup can change which runs
+reach targets and their start times; retain failed preflights in analysis.
+Synthetic tests establish scheduling, accounting, and interruption behavior,
+not live recovery rates or causes of transport failure. Existing frozen
+protocols and completed findings are unchanged.
+
 Bounded workers share Tor and network capacity. Global pacing controls the
 coordinator's top-level probe invocations, including preflight; it does not
 bound redirect hops, packet starts, or aggregate traffic to a provider reached
