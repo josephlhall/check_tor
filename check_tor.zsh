@@ -169,6 +169,8 @@ usage() {
     print -r -- "  -h, --help                Show this help and exit."
     print -r -- ""
     print -r -- "Detailed-mode options (require --format jsonl-v2):"
+    print -r -- "  --preflight-retry none|transient  Default: none (one verification attempt)."
+    print -r -- "    transient allows three attempts, with 15s/30s waits for eligible transport failures."
     print -r -- "  --run-id TEXT, --group-id TEXT  Opaque labels for downstream consumers."
     print -r -- "  --trials COUNT            Fixed Tor trials, 1–100; replaces failure retries."
     print -r -- "  --control conditional|always|never  Default: conditional."

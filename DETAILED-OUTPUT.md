@@ -53,6 +53,7 @@ preserving the configured TLS trust settings.
 | `--max-partner-gap S` | Mark a pair late if the start times of its two probes are more than S seconds apart. Accepts positive seconds up to 3600, default 60. Requires trial-scoped controls when set explicitly. |
 | `--execution-policy legacy\|paired-cautious` | Default `legacy`. `paired-cautious` prioritizes ready pair partners and stops an input hostname after explicit HTTP 429. |
 | `--rate-limit-stop immediate\|after-pair` | Requires `paired-cautious`. Default `immediate`. `after-pair` also requires fixed trials, `--control always`, and `--control-scope trial`. |
+| `--preflight-retry none\|transient` | Default `none`: one Tor verification attempt. `transient` permits three attempts with 15s/30s waits for eligible transport failures. |
 | `--workers N` | At most N active target bundles, from 1 to 32; default 1. |
 | `--start-gap S` | Global minimum interval between coordinator probe invocations, in seconds, from 0 to 3600; default 0. |
 | `--run-id TEXT`, `--group-id TEXT` | Optional labels for your analysis. Join records by the scanner's generated execution ID. |
@@ -82,6 +83,76 @@ A target bundle contains the requests for one input occurrence. A
 target-scoped control belongs to the whole bundle. Use trial-scoped controls
 to compare individual pairs. Fixed trials report individual outcomes and
 counts. Choose a separate analysis rule if you need a single target verdict.
+
+## Tor verification and retries
+
+`--preflight-retry transient` opts into bounded startup retries. The default
+`none` retains one attempt. Both values require detailed mode, and invalid
+values fail before input or traffic. The selected retry policy does not alter
+target trials, controls, pairing, or recovery. It never restarts the scanner,
+rotates circuits, changes proxies, or switches verification endpoints.
+
+An attempt can be retried only when it completes without a local failure or
+body-cap exhaustion, curl explicitly reports `000` (no HTTP response), and
+curl reports one of these exit codes. Missing or malformed HTTP write-out
+cannot establish retry eligibility.
+
+| Curl exits | Transport failure |
+| --- | --- |
+| `5`, `6` | Proxy or host name resolution failed. |
+| `7` | Connection failed. |
+| `28` | Operation timed out, including connection timeout. |
+| `35` | TLS connection failed. |
+| `52` | Empty reply. |
+| `55`, `56` | Sending or receiving network data failed. |
+
+These codes identify eligible failures, not their underlying cause or a
+promise of recovery. Certificate-validation errors, all HTTP responses,
+unknown curl errors, explicit non-Tor results, malformed or unusable JSON,
+body-cap exhaustion, and local setup/output/storage/cleanup errors stop
+without retries. There are no HTTP-status retries.
+
+After a retryable failure, the coordinator waits 15 seconds after the first
+completion and 30 seconds after the second. At most three requests are issued.
+Every request retains the ten-second timeout, fixed 1 MiB body cap, SOCKS
+endpoint, certificate validation, and no-redirect behavior. Global pacing
+also applies: the next launch must satisfy both the completion-based backoff
+and the previous-launch-based `--start-gap`. Waiting is interruptible;
+cancellation prevents subsequent preflight and target launches.
+
+Targets require successful curl completion and a valid JSON object with a
+boolean `IsTor: true`. Duplicate keys, trailing garbage, and matching strings
+inside invalid or partial bodies do not verify Tor. An available HTTP status
+must be 200; absent write-out metadata remains null and does not itself
+invalidate an otherwise successful response, preserving existing behavior.
+Only bounded verification outcomes are retained, never the response body or
+exit IP.
+
+This is an opt-in extension within JSONL v2. Readers that require exactly one
+preflight must deliberately support multiple attempts before selecting
+`transient`. Every issued preflight has its own `attempt_start`/`attempt_end`,
+unique `attempt_id`, timestamps, timeout, and transport facts. Preflights have
+null target/trial/pair identities and never enter target verdict totals.
+`settings.preflight_retry` records `none` or `transient`;
+`settings.preflight_retry_delays` is `[]` or `[15, 30]`, and
+`settings.preflight_retry_curl_exits` records the finite eligibility allowlist.
+`planned.preflight_requests` is the upper bound, 1 or 3, not the actual count.
+Actual launches and completed observations remain in
+`run_end.counts.preflight.issued` and `.completed`. Exhaustion ends with state
+`error`, exit code 1, and zero target requests; recovery proceeds with the
+normal target schedule. A completed failed verification still counts as a
+completed preflight observation.
+
+Preflight `attempt_end` records add `preflight_reason`: `verified`, `not_tor`,
+`invalid_response`, `http_status`, `body_limit`, `transport_failure`,
+`local_error`, or `incomplete`. `tor_verified` is null when an interrupted or
+failed adapter produces no usable result. `preflight_retryable` describes transport
+eligibility independently of policy, remaining attempts, and cancellation;
+true does not mean another request was issued. Records for adapters that
+could not start may omit these fields. Cleanup or output failure can stop the
+run after a completed attempt record; inspect `run_end` as well. The default
+retains one-attempt scheduling and existing count semantics, with these
+additive settings and evidence fields.
 
 ## Routing and request configuration
 
