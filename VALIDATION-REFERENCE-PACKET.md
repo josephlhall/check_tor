@@ -1,9 +1,10 @@
 # Task-Based Reference Experiment Preparation Packet
 
-One existing test endpoint can advance to readiness review. Four other
-conditions still need endpoint construction and operator permission, and may
-be deferred. The owner approved offline preparation with a budget of zero
-remote requests. A later manifest must identify the endpoints and receive
+The existing normal-navigation candidate can advance to readiness review.
+The readable HTTP 202 fixture is available locally. It needs live deployment,
+operator permission, and qualification. The other three conditions still need
+construction or permission and may be deferred. The owner approved offline
+preparation with a budget of zero remote requests. A later manifest must identify the endpoints and receive
 explicit authority before live preflight or collection.
 
 > **Issue:** [#39](https://github.com/josephlhall/check_tor/issues/39)
@@ -45,7 +46,7 @@ unavailable.
 | Condition | Status |
 |---|---|
 | [`REF-NORMAL`](#ref-normal-ordinary-content-with-working-navigation) | Candidate for later preflight, subject to current verification and new approval |
-| [`REF-202`](#ref-202-intelligible-http-202-status) | Requires construction and operator authorization |
+| [`REF-202`](#ref-202-intelligible-http-202-status) | Local fixture available. Live deployment, qualification, and operator authorization pending. |
 | [`REF-CHALLENGE`](#ref-challenge-managed-challenge) | Requires construction and operator permission |
 | [`REF-CLIENT`](#ref-client-client-dependent-refusal) | Requires construction, permission, and a stable rule that distinguishes the clients |
 | [`REF-TOR-DIFF`](#ref-tor-diff-tor-versus-direct-requests) | Requires construction, permission, and a reviewable Tor classification rule |
@@ -72,8 +73,9 @@ alone provides no evidence of a challenge mechanism or browser friction.
 [RFC 9110 §15.3.3](https://www.rfc-editor.org/rfc/rfc9110.html#section-15.3.3)
 
 The pilot's documented httpbin `/status/202` route produced an empty page in
-both browsers. This condition needs a purpose-built, intelligible page and
-operator authorization.
+both browsers. The [local reference lab](reference-lab/OPERATIONS.md) serves a
+readable 202 example with a fixed response. Its operator handoff describes
+what must be verified and authorized before R02 can be selected.
 
 ### `REF-CHALLENGE` Managed challenge
 
@@ -289,7 +291,7 @@ evidence; success after interaction is unknown.
 | Condition dispositions | One future-preflight candidate; four construction/permission conditions, with deferral allowed; approved as preparation dispositions |
 | Collection shape and resource budget | At most seven analytic cases and zero remote requests during preparation; approved planning ceiling, not live traffic authority |
 | Interpretation and synthetic walk-through | Original categories retained; matching conclusive browser categories give `SAME_TASK_OUTCOME`, with times and impediments retained separately. Timing examples added for the 2026-11-07 revision. |
-| Unresolved readiness | Endpoint construction or permission, independent configuration checks, current catalog review, host/environment, private storage and retention, preflight budget if any, explicit live authority |
+| Unresolved readiness | Endpoint construction or deployment as applicable, operator permission, independent configuration checks, current catalog review, host/environment, private storage and retention, preflight budget if any, explicit live authority |
 
 Owner approval completes the methodological review of this preparation
 packet. Any material amendment needs a dated review and a new prospective

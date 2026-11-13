@@ -298,6 +298,11 @@ entry and its endpoint belong only in the approved private structured store.
 This public file may report only a sanitized behavior-family description when
 the human reviewer determines that doing so is safe and useful.
 
+The [local reference lab](reference-lab/OPERATIONS.md) provides constructed
+normal-navigation and readable HTTP 202 examples. Each is a local fixture.
+A public deployment needs its own catalog record, operator authorization, and
+current qualification under issue #41.
+
 The completed issue #32 dry run did not build controlled infrastructure. New
 construction needs separate scope and authorization. A desired row may remain
 unfilled rather than expanding a study to obtain it.
