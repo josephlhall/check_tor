@@ -25,10 +25,12 @@ responses, and the only observed Tor Browser disadvantage coincided with
 scanner `PASS`. Those findings explain why the packet proposes the
 conditions below. The expected outcomes are hypotheses for a later study.
 
-The preparation kept the reviewed scanner and its schema version 1 output
-(`--format jsonl`) as the instrument. Using a later scanner capability, such
-as [`--format jsonl-v2`](DETAILED-OUTPUT.md), would require an approved
-protocol revision.
+The preparation uses the scanner's schema version 1 output (`--format jsonl`),
+a 1 MiB target-body cap on both routes, and one Tor verification request per
+invocation. Freeze the scanner commit, exact command, and effective cap in
+the readiness manifest. Changes to the cap, startup retry policy, or output
+schema require prospective protocol and manifest approval.
+[Readiness issue #41](https://github.com/josephlhall/check_tor/issues/41)
 
 ## Reference-condition specifications
 
@@ -200,7 +202,7 @@ every value below before separately authorizing any live preflight or case:
 |---|---|
 | Protocol and approval | `TACP-0.4` revision, review date, reviewer, accepted timing and interpretation rules, unresolved conditions |
 | Case selection | Approved catalog entry IDs, exact URLs kept private when required, independent expectation evidence and date, public task/navigation, authorization, association/publication review, lower entry limit, final slot/order/repeats |
-| Instrument and host | Scanner commit and exact options, JSONL schema, OS and tool versions, Tor/Tor Browser and ordinary-browser versions, security level, time sync, observer mode, fresh-state controls |
+| Instrument and host | Scanner commit and exact options, JSONL schema, effective target-body cap, preflight attempt budget, OS and tool versions, Tor/Tor Browser and ordinary-browser versions, security level, time sync, observer mode, fresh-state controls |
 | Traffic | Per-case and aggregate ceiling, any lower endpoint limit, redirect/subresource weight assessment, exact preflight request/action budget, stopping and no-substitution rules |
 | Private data | Owner-only external root, storage permissions, backup/sync exclusion, raw versus structured paths, access list, raw audit/deletion deadline, structured retention/deletion or extension date, no screenshot or cookie collection |
 | Safety and authority | Operator contact/opt-out and incident path, current permission, halt triggers, separate explicit authority for preflight and collection, analysis and publication review gates |
