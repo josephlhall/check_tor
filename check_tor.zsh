@@ -29,8 +29,8 @@ TOR_PROXY="localhost:9050"
 MAX_CIRCUITS=3
 
 # Per-request timeouts, in seconds.
-TIMEOUT_FIRST=60      # first attempt over Tor
-TIMEOUT_RETRY=30      # retries on fresh circuits
+TIMEOUT_FIRST=180     # first attempt over Tor
+TIMEOUT_RETRY=180     # retries on fresh circuits
 TIMEOUT_CLEARNET=20   # control request without Tor
 # Disabling the control suppresses the Tor-specific inference, not the
 # underlying verdict from the automated Tor probes.
@@ -162,8 +162,8 @@ usage() {
     print -r -- "  --max-redirects COUNT     Redirects followed, 0–100 (default: 10); initial request is not counted."
     print -r -- "  --max-body-bytes SIZE     Target response limit, 1 byte–10 MiB (default: 1 MiB)."
     print -r -- "    Use whole bytes or a case-insensitive KiB/MiB suffix, e.g. 512KiB or 10MiB."
-    print -r -- "  --timeout-first SECONDS   First Tor attempt, 1–3600 (default: 60)."
-    print -r -- "  --timeout-retry SECONDS   Later Tor attempts, 1–3600 (default: 30)."
+    print -r -- "  --timeout-first SECONDS   First Tor attempt, 1–3600 (default: 180)."
+    print -r -- "  --timeout-retry SECONDS   Later Tor attempts, 1–3600 (default: 180)."
     print -r -- "  --timeout-clearnet SECONDS  Clearnet control, 1–3600 (default: 20)."
     print -r -- "  --no-clearnet             Skip the clearnet control comparison."
     print -r -- "  -h, --help                Show this help and exit."

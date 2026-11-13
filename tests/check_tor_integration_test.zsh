@@ -50,6 +50,10 @@ assert_not_contains() {
     fi
 }
 
+curl_timeouts() {
+    awk '{ for (i = 1; i < NF; i++) if ($i == "--max-time") print $(i + 1) }' "$1"
+}
+
 FAKE_BIN="$TEST_TMP/bin"
 mkdir "$FAKE_BIN"
 zsh_executable=${commands[zsh]}
@@ -182,7 +186,7 @@ assert_eq "source stderr" "" "$(< "$source_case/stderr")"
 assert_eq "source preserves caller arguments and trap" \
     "2:caller-argument:second-argument" "$(< "$source_case/caller-trap")"
 assert_eq "source callable boundaries" \
-    "$source_case/targets.txt:jsonl,localhost:9050,3,60,30,20,1,10,1048576:\"quote\\\" slash\\\\ tab\\u0009 line\\u000a\":alpha.example.test,beta.example.test" \
+    "$source_case/targets.txt:jsonl,localhost:9050,3,180,180,20,1,10,1048576:\"quote\\\" slash\\\\ tab\\u0009 line\\u000a\":alpha.example.test,beta.example.test" \
     "$(< "$source_case/function-result")"
 assert_eq "source curl calls" "" "$(< "$source_case/curl.log")"
 assert_eq "source temporary files" 0 "$(find "$source_case/scanner-tmp" -type f | wc -l | tr -d ' ')"
@@ -411,6 +415,8 @@ assert_contains "blocked summary count" "1 FAIL" "$scanner_stdout"
 assert_contains "blocked target list" "blocked.example.test (FAIL)" "$scanner_stdout"
 assert_eq "persistent probe count" 4 "$(< "$block_case/curl.state")"
 assert_eq "three Tor probes" 3 "$(grep -c -- '--proxy-user' "$block_case/curl.log")"
+assert_eq "text timeouts for preflight, three Tor attempts, and control" \
+    $'10\n180\n180\n180\n20' "$(curl_timeouts "$block_case/curl.log")"
 
 # Structured block results expose retry and clearnet-control semantics without
 # requiring consumers to interpret the human detail string.
@@ -423,6 +429,8 @@ assert_contains "JSONL control verdict" \
     '"clearnet_control":{"enabled":true,"performed":true,"verdict":"PASS"}' "$scanner_stdout"
 assert_contains "JSONL Tor-specific result" '"tor_specific":true' "$scanner_stdout"
 assert_contains "JSONL Tor-specific summary" '"tor_specific_findings":1' "$scanner_stdout"
+assert_eq "JSONL v1 timeouts for preflight, three Tor attempts, and control" \
+    $'10\n180\n180\n180\n20' "$(curl_timeouts "$json_block_case/curl.log")"
 
 json_inconclusive_case="$TEST_TMP/json-inconclusive"
 mkdir "$json_inconclusive_case"
@@ -448,9 +456,8 @@ assert_contains "configured control remains enabled" \
 assert_eq "configured probe count" 3 "$(< "$configured_case/curl.state")"
 assert_eq "configured proxy reaches preflight and Tor probes" 3 \
     "$(grep -c -- '--socks5-hostname proxy.example.test:19050' "$configured_case/curl.log")"
-assert_eq "configured first timeout" 1 "$(grep -c -- '--max-time 11' "$configured_case/curl.log")"
-assert_eq "configured retry timeout" 1 "$(grep -c -- '--max-time 12' "$configured_case/curl.log")"
-assert_eq "configured control timeout" 1 "$(grep -c -- '--max-time 13' "$configured_case/curl.log")"
+assert_eq "configured timeouts for preflight, first Tor attempt, retry, and control" \
+    $'10\n11\n12\n13' "$(curl_timeouts "$configured_case/curl.log")"
 
 # Disabling clearnet leaves a persistent automated-Tor block observable, but
 # deliberately withholds the Tor-specific inference that needs a control.

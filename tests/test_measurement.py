@@ -212,6 +212,13 @@ class MeasurementTests(unittest.TestCase):
             key=lambda row: row["start"],
         )
 
+    def curl_timeouts(self):
+        timeouts = []
+        for call in self.calls():
+            args = call["args"]
+            timeouts.append(args[args.index("--max-time") + 1])
+        return timeouts
+
     def spawn(
         self,
         *arguments,
@@ -1264,6 +1271,13 @@ class MeasurementTests(unittest.TestCase):
         self.assertEqual(self.assert_accounting(rows)["state"], "error")
         self.assert_clean()
 
+    def test_default_curl_timeouts(self):
+        status, _, error = self.run_scan(
+            plan={"https://alpha.example.test|tor": [{"code": 403}]},
+        )
+        self.assertEqual(status, 0, error)
+        self.assertEqual(self.curl_timeouts(), ["10", "180", "180", "180", "20"])
+
     def test_legacy_controls_and_requested_timeout_metadata(self):
         for control, direct_count in [("always", 1), ("never", 0)]:
             self.clear_logs()
@@ -1286,6 +1300,10 @@ class MeasurementTests(unittest.TestCase):
             )
             self.assertEqual(
                 sum(row["route"] == "direct" for row in ends), direct_count
+            )
+            self.assertEqual(
+                self.curl_timeouts(),
+                ["10", "17", "13"] + (["11"] if direct_count else []),
             )
             start = self.select(rows, "run_start")[0]
             self.assertEqual(start["settings"]["trial_policy"], "failure-retry")

@@ -125,10 +125,23 @@ scan. The following options apply to ordinary scans and detailed measurements.
 | `--circuits N` | `3` | Maximum Tor attempts for failure-driven retries, from 1 to 100. |
 | `--max-redirects N` | `10` | Redirects curl may follow per Tor or comparison probe, from 0 to 100. |
 | `--max-body-bytes SIZE` | `1MiB` | Maximum bytes retained from each target response on either route, from 1 byte through 10 MiB. |
-| `--timeout-first N` | `60` | First Tor attempt's timeout in seconds, from 1 to 3600. |
-| `--timeout-retry N` | `30` | Later Tor attempts' timeout in seconds, from 1 to 3600. |
+| `--timeout-first N` | `180` | First Tor attempt's timeout in seconds, from 1 to 3600. |
+| `--timeout-retry N` | `180` | Later Tor attempts' timeout in seconds, from 1 to 3600. |
 | `--timeout-clearnet N` | `20` | Comparison request's timeout in seconds, from 1 to 3600. |
 | `--no-clearnet` | Comparison enabled | Skip the comparison request. Tor specificity then remains unknown. |
+
+The 180-second Tor timeouts give slow requests more time to finish and can
+increase scan duration. Preliminary Field Station Gold 1 measurements compared
+Tor and direct access across 785 civil-society and technology organization
+hostnames. The beta configuration appears to have produced more successful
+observations. It raised the route budget from 60 to 180 seconds, the redirect
+limit from one to ten, and the response-body limit from 1 MiB to 10 MiB. The
+comparison cannot isolate the effect of the timeout. A completed curl request
+documents what the scanner could retrieve under those settings. Assessing
+usability requires a separate observation in Tor Browser.
+
+Record the effective timeouts when comparing runs. Tor preflight has a
+separate, fixed 10-second timeout.
 
 The redirect budget excludes the initial request. With `--max-redirects 1`,
 curl can reach the first redirect destination. If that destination sends
@@ -146,8 +159,7 @@ direct target probe, including repeated trials. Reaching it is inconclusive
 even when curl reports HTTP 200. Larger caps can increase download and
 inspection time and temporary disk use, especially with concurrent workers.
 Request timeouts still apply. Tor preflight has its own fixed 1 MiB cap and
-fails verification if it reaches that cap. Successful HTTP retrieval alone
-does not establish browser usability.
+fails verification if it reaches that cap.
 
 ### Text and JSON Lines v1
 

@@ -117,9 +117,27 @@ def arguments(argv):
         help="target response limit, 1 byte to 10 MiB (default: 1 MiB). "
         "Use whole bytes or a case-insensitive KiB/MiB suffix, e.g. 512KiB or 10MiB.",
     )
-    p.add_argument("--timeout-first", type=bounded_int(3600), default=60)
-    p.add_argument("--timeout-retry", type=bounded_int(3600), default=30)
-    p.add_argument("--timeout-clearnet", type=bounded_int(3600), default=20)
+    p.add_argument(
+        "--timeout-first",
+        type=bounded_int(3600),
+        default=180,
+        metavar="SECONDS",
+        help="first Tor attempt, 1 to 3600 seconds (default: %(default)s)",
+    )
+    p.add_argument(
+        "--timeout-retry",
+        type=bounded_int(3600),
+        default=180,
+        metavar="SECONDS",
+        help="later Tor attempts, 1 to 3600 seconds (default: %(default)s)",
+    )
+    p.add_argument(
+        "--timeout-clearnet",
+        type=bounded_int(3600),
+        default=20,
+        metavar="SECONDS",
+        help="direct control, 1 to 3600 seconds (default: %(default)s)",
+    )
     p.add_argument("--no-clearnet", action="store_true")
     p.add_argument(
         "--preflight-retry", choices=["none", "transient"], default="none",
