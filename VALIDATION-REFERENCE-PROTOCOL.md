@@ -56,6 +56,11 @@ schema version. A failed scanner preflight has **no target record**. Do not
 convert it to `TIMEOUT`, a missing control to `false`, or `detail` prose to a
 structured response header.
 
+Record the effective 1 MiB target-body cap for both Tor and direct requests
+and budget one Tor verification request per scanner invocation. The
+[preparation packet](VALIDATION-REFERENCE-PACKET.md) defines what the manifest
+must freeze before collection.
+
 JSONL v1 has no HTTP status, response headers, per-attempt verdicts,
 or browser outcome. A reference condition's expected status or challenge
 mechanism comes from independently reviewed operator documentation or
