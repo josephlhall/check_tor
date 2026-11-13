@@ -330,6 +330,10 @@ suites on Ubuntu and macOS for pull requests and pushes to `main`, and can run
 on demand. On macOS, it also runs the Python suites with Apple’s system
 Python. The tests make no requests to public control hosts.
 
+The optional [local HTTPS reference lab](reference-lab/OPERATIONS.md) has its
+own loopback tests. nginx is a lab dependency. Routine scanner checks use the
+tools listed above.
+
 ## Releases and license
 
 Use the tagged source from [GitHub
