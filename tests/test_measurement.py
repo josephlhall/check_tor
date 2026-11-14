@@ -830,6 +830,7 @@ class MeasurementTests(unittest.TestCase):
     def test_preflight_failure_is_accounted_without_target_requests(self):
         status, rows, error = self.run_scan(plan={"preflight": [{"fail": True}]})
         self.assertNotEqual(status, 0)
+        self.assertIn("Tor preflight failed", error)
         self.assertEqual([r["url"] for r in self.calls()], [PREFLIGHT])
         end = self.assert_accounting(rows)
         self.assertEqual(end["state"], "error")
@@ -908,7 +909,7 @@ class MeasurementTests(unittest.TestCase):
         for row in preflights:
             self.assertTrue(row["started_at"])
             self.assertTrue(row["ended_at"])
-            self.assertEqual(row["requested_timeout"], 10)
+            self.assertEqual(row["requested_timeout"], 20)
             self.assertIsNone(row["trial_id"])
             self.assertIsNone(row["pair_id"])
         self.assertEqual(rows[0]["planned"]["preflight_requests"], 3)
@@ -918,7 +919,7 @@ class MeasurementTests(unittest.TestCase):
         self.assertEqual(end["verdict_counts"], {"tor": {"PASS": 1}, "direct": {}})
         self.assertLessEqual(max(waits), 0.02)
         for call in self.calls()[:2]:
-            self.assertEqual(call["args"][call["args"].index("--max-time") + 1], "10")
+            self.assertEqual(call["args"][call["args"].index("--max-time") + 1], "20")
             self.assertIn("--socks5-hostname", call["args"])
             self.assertNotIn("-k", call["args"])
 
@@ -987,6 +988,20 @@ class MeasurementTests(unittest.TestCase):
                 self.assertIs(preflight["preflight_retryable"], False)
                 end = self.assert_accounting(rows)
                 self.assertEqual(end["counts"]["target"]["issued"], 0)
+
+    def test_preflight_timeout_is_reported_without_target_requests(self):
+        status, rows, error = self.run_scan(
+            plan={"preflight": [{"exit": 28, "code": "000"}]}
+        )
+        message = "Tor startup check timed out after 20 seconds."
+        self.assertEqual(status, 1)
+        self.assertIn(message, error)
+        self.assertEqual(self.curl_timeouts(), ["20"])
+        self.assertEqual([call["url"] for call in self.calls()], [PREFLIGHT])
+        end = self.assert_accounting(rows)
+        self.assertEqual(end["error"], message)
+        self.assertEqual(end["counts"]["target"]["issued"], 0)
+        self.assert_clean()
 
     def test_preflight_default_and_invalid_policy_never_retry(self):
         status, rows, _ = self.run_scan(plan={"preflight": [{"exit": 35, "code": "000"}, {}]})
@@ -1276,7 +1291,7 @@ class MeasurementTests(unittest.TestCase):
             plan={"https://alpha.example.test|tor": [{"code": 403}]},
         )
         self.assertEqual(status, 0, error)
-        self.assertEqual(self.curl_timeouts(), ["10", "180", "180", "180", "20"])
+        self.assertEqual(self.curl_timeouts(), ["20", "180", "180", "180", "20"])
 
     def test_legacy_controls_and_requested_timeout_metadata(self):
         for control, direct_count in [("always", 1), ("never", 0)]:
@@ -1303,7 +1318,7 @@ class MeasurementTests(unittest.TestCase):
             )
             self.assertEqual(
                 self.curl_timeouts(),
-                ["10", "17", "13"] + (["11"] if direct_count else []),
+                ["20", "17", "13"] + (["11"] if direct_count else []),
             )
             start = self.select(rows, "run_start")[0]
             self.assertEqual(start["settings"]["trial_policy"], "failure-retry")

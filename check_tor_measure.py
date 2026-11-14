@@ -1109,6 +1109,10 @@ class Engine:
             if result["local_error"]:
                 status = "error"
             self.preflight_retryable = result["preflight_retryable"]
+            self.preflight_timed_out = (
+                result["preflight_reason"] == "transport_failure"
+                and result["curl_exit"] == 28
+            )
         if fields["phase"] == "target":
             result["onion_advertisements"] = onion_advertisement_evidence(
                 task["directory"], fields["url"], result
@@ -1538,12 +1542,16 @@ class Engine:
         state, code = "complete", 0
         self.preflight_ok = False
         self.preflight_retryable = False
+        self.preflight_timed_out = False
         try:
             self.start_record()
             self.run_preflight()
             if CANCELLED:
                 state, code = "interrupted", 128 + CANCELLED
             elif not self.preflight_ok:
+                if self.preflight_timed_out:
+                    timeout = self.profile["preflight_timeout"]
+                    raise Failure(f"Tor startup check timed out after {timeout} seconds.")
                 raise Failure("Tor preflight failed")
             if self.args.execution_policy == "paired-cautious":
                 self.run_cautious_targets()

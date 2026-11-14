@@ -227,7 +227,7 @@ successful curl retrieval alone does not establish browser usability.
 For new studies, freeze the startup verification policy prospectively.
 Detailed mode defaults to one attempt; `--preflight-retry transient` allows
 three attempts with 15- and 30-second waits after eligible transport failures,
-while retaining ten-second timeouts, the independent 1 MiB cap, and global
+with a 20-second limit per attempt, the independent 1 MiB cap, and global
 pacing. It requires completed successful Tor verification before any target
 work. The [finite retry policy and output contract](DETAILED-OUTPUT.md#tor-verification-and-retries)
 exclude HTTP, certificate, invalid/non-Tor response, body-cap, and local
