@@ -141,7 +141,8 @@ documents what the scanner could retrieve under those settings. Assessing
 usability requires a separate observation in Tor Browser.
 
 Record the effective timeouts when comparing runs. Tor preflight has a
-separate, fixed 10-second timeout.
+separate, fixed 20-second timeout. If curl reports a timeout during Tor
+verification, the scanner identifies it on stderr.
 
 The redirect budget excludes the initial request. With `--max-redirects 1`,
 curl can reach the first redirect destination. If that destination sends
@@ -244,7 +245,7 @@ Detailed mode normally verifies Tor once before starting targets. Opt in to
 `--format jsonl-v2 --preflight-retry transient` to allow up to three
 verification requests. Eligible transport failures wait 15 seconds before the
 second attempt and 30 seconds before the third; each request retains its
-ten-second timeout and fixed 1 MiB body cap. Global `--start-gap` pacing also
+20-second timeout and fixed 1 MiB body cap. Global `--start-gap` pacing also
 applies. Targets start only after completed, valid Tor verification.
 
 Curl must explicitly report no HTTP response (`000`) and exit with `5`, `6`,

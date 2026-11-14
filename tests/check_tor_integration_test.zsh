@@ -80,7 +80,10 @@ done
 print -r -- "$*" >> "$CHECK_TOR_FAKE_LOG"
 
 if [[ "$url" == "https://check.torproject.org/api/ip" ]]; then
-    if [[ "$CHECK_TOR_FAKE_SCENARIO" == preflight_fail ]]; then
+    if [[ "$CHECK_TOR_FAKE_SCENARIO" == preflight_timeout ]]; then
+        print -rn -- '{"IsTor":true'
+        exit 28
+    elif [[ "$CHECK_TOR_FAKE_SCENARIO" == preflight_fail ]]; then
         print -r -- '{"IsTor":false}'
     else
         print -r -- '{"IsTor":true,"IP":"192.0.2.10"}'
@@ -416,7 +419,7 @@ assert_contains "blocked target list" "blocked.example.test (FAIL)" "$scanner_st
 assert_eq "persistent probe count" 4 "$(< "$block_case/curl.state")"
 assert_eq "three Tor probes" 3 "$(grep -c -- '--proxy-user' "$block_case/curl.log")"
 assert_eq "text timeouts for preflight, three Tor attempts, and control" \
-    $'10\n180\n180\n180\n20' "$(curl_timeouts "$block_case/curl.log")"
+    $'20\n180\n180\n180\n20' "$(curl_timeouts "$block_case/curl.log")"
 
 # Structured block results expose retry and clearnet-control semantics without
 # requiring consumers to interpret the human detail string.
@@ -430,7 +433,7 @@ assert_contains "JSONL control verdict" \
 assert_contains "JSONL Tor-specific result" '"tor_specific":true' "$scanner_stdout"
 assert_contains "JSONL Tor-specific summary" '"tor_specific_findings":1' "$scanner_stdout"
 assert_eq "JSONL v1 timeouts for preflight, three Tor attempts, and control" \
-    $'10\n180\n180\n180\n20' "$(curl_timeouts "$json_block_case/curl.log")"
+    $'20\n180\n180\n180\n20' "$(curl_timeouts "$json_block_case/curl.log")"
 
 json_inconclusive_case="$TEST_TMP/json-inconclusive"
 mkdir "$json_inconclusive_case"
@@ -457,7 +460,7 @@ assert_eq "configured probe count" 3 "$(< "$configured_case/curl.state")"
 assert_eq "configured proxy reaches preflight and Tor probes" 3 \
     "$(grep -c -- '--socks5-hostname proxy.example.test:19050' "$configured_case/curl.log")"
 assert_eq "configured timeouts for preflight, first Tor attempt, retry, and control" \
-    $'10\n11\n12\n13' "$(curl_timeouts "$configured_case/curl.log")"
+    $'20\n11\n12\n13' "$(curl_timeouts "$configured_case/curl.log")"
 
 # Disabling clearnet leaves a persistent automated-Tor block observable, but
 # deliberately withholds the Tor-specific inference that needs a control.
@@ -543,6 +546,14 @@ run_scanner preflight_fail "$json_preflight_case/targets.txt" "$json_preflight_c
 assert_eq "JSONL preflight failure status" 1 "$scanner_status"
 assert_eq "JSONL incomplete scan stdout" "" "$scanner_stdout"
 assert_contains "JSONL preflight diagnostic stderr" "Tor connection failed" "$scanner_stderr"
+assert_not_contains "non-Tor result does not report a timeout" "timed out" "$scanner_stderr"
+
+# A partial affirmative reply with curl exit 28 must never admit targets.
+run_scanner preflight_timeout "$json_preflight_case/targets.txt" "$json_preflight_case" jsonl
+assert_eq "JSONL preflight timeout status" 1 "$scanner_status"
+assert_eq "JSONL preflight timeout stdout" "" "$scanner_stdout"
+assert_contains "JSONL preflight timeout stderr" "Tor startup check timed out after 20 seconds." "$scanner_stderr"
+assert_eq "preflight timeout never probes targets" 20 "$(curl_timeouts "$json_preflight_case/curl.log")"
 
 if (( failures > 0 )); then
     print -u2 -- "$failures of $tests checks failed"

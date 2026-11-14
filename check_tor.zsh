@@ -45,7 +45,7 @@ MAX_BODY_BYTES=$DEFAULT_BODY_BYTES
 MAX_SUPPORTED_BODY_BYTES=10485760
 PREFLIGHT_BODY_BYTES=1048576
 MAX_REDIRECTS=10
-PREFLIGHT_TIMEOUT=10
+PREFLIGHT_TIMEOUT=20
 
 # Browser-like headers reduce trivial bot-fingerprint differences, but they do
 # not make curl equivalent to Chrome: TLS and JavaScript behavior still differ.
@@ -623,6 +623,11 @@ tor_preflight() {
         https://check.torproject.org/api/ip > >(probe_body_sink "$PREFLIGHT_BODY_BYTES")
     probe_read_status
     probe_measure_body "$PREFLIGHT_BODY_BYTES"
+    # A timed-out response can contain a partial affirmative Tor result.
+    if (( probe_exit_known && probe_exit == 28 )); then
+        print -u2 -r -- "[${RED}ERROR${OFF}] Tor startup check timed out after ${PREFLIGHT_TIMEOUT} seconds."
+        return 1
+    fi
     if (( ! probe_local_failure && ! probe_body_limited )); then
         tor_check=$(<"$BODY")
     fi

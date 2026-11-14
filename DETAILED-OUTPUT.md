@@ -114,7 +114,7 @@ without retries. There are no HTTP-status retries.
 
 After a retryable failure, the coordinator waits 15 seconds after the first
 completion and 30 seconds after the second. At most three requests are issued.
-Every request retains the ten-second timeout, fixed 1 MiB body cap, SOCKS
+Each request has a 20-second timeout and retains the fixed 1 MiB body cap, SOCKS
 endpoint, certificate validation, and no-redirect behavior. Global pacing
 also applies: the next launch must satisfy both the completion-based backoff
 and the previous-launch-based `--start-gap`. Waiting is interruptible;
