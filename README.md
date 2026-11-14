@@ -321,10 +321,14 @@ The Zsh tests cover verdicts and the ordinary CLI. The Python tests cover
 detailed measurements, transport and redirect behavior, `Retry-After` and
 onion advertisement evidence, and real curl certificate validation against a
 local HTTPS server.
-The TLS tests cover a trusted certificate, an untrusted issuer, and a hostname
-mismatch. They use disposable trust settings without changing the machine’s
-trust store. Other transport tests use local files and fake curl for several
-failure cases. Broader real connection-failure coverage is tracked in [issue #47](https://github.com/josephlhall/check_tor/issues/47).
+The loopback TLS and transport tests cover certificate trust and hostname
+checks, stalls during and after a TLS handshake, an empty HTTP reply, and a
+server-side truncated response. The stall tests verify the stage reached on the
+server and use a two-second curl deadline without asserting elapsed time. The
+empty-reply test uses a clean close so the result is independent of how the OS
+reports a TCP reset. TLS uses a disposable CA without changing the machine’s
+trust store. These fixtures cover curl and scanner behavior on the local
+connection. Live Tor and browser comparisons use a separate study protocol.
 
 The [Offline tests workflow](.github/workflows/offline-tests.yml) runs those
 suites on Ubuntu and macOS for pull requests and pushes to `main`, and can run
