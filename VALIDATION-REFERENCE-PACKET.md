@@ -9,7 +9,8 @@ This document preserves the approved preparation design and its original
 planning ceiling. It is not an active live manifest. The remaining conditions
 have reusable offline recipes under #44–46; any future batch
 needs new endpoint qualification and explicit authority for its exact traffic.
-See the [offline implementation checkpoint](reference-lab/IMPLEMENTATION-CHECKPOINT.md).
+See the [offline implementation checkpoint](reference-lab/IMPLEMENTATION-CHECKPOINT.md)
+and the [November 15 qualification results](reference-lab/QUALIFICATION.md).
 
 > **Issue:** [#39](https://github.com/josephlhall/check_tor/issues/39)
 >
@@ -51,9 +52,9 @@ unavailable.
 |---|---|
 | [`REF-NORMAL`](#ref-normal-ordinary-content-with-working-navigation) | Candidate for later preflight, subject to current verification and new approval |
 | [`REF-202`](#ref-202-intelligible-http-202-status) | Local fixture reusable; first-batch public endpoint retired. Any new deployment needs fresh qualification and authority. |
-| [`REF-CHALLENGE`](#ref-challenge-managed-challenge) | [Offline rule/task recipe](reference-lab/CHALLENGE.md); actual provider/plan, deployment and qualification remain pending. |
-| [`REF-CLIENT`](#ref-client-client-dependent-refusal) | [Offline candidate rule](reference-lab/CONDITIONS.md); exact browser compatibility and live authority remain pending. |
-| [`REF-TOR-DIFF`](#ref-tor-diff-tor-versus-direct-requests) | [Offline candidate rule](reference-lab/CONDITIONS.md); current source/coverage review, deployment and qualification remain pending. |
+| [`REF-CHALLENGE`](#ref-challenge-managed-challenge) | Both browsers completed a managed challenge automatically on the temporary deployment. Review the [recipe](reference-lab/CHALLENGE.md) and current provider behavior for each new deployment. |
+| [`REF-CLIENT`](#ref-client-client-dependent-refusal) | Partially qualified. Both browsers completed the task, and per-request browser header verification remains open. See the [condition recipe](reference-lab/CONDITIONS.md). |
+| [`REF-TOR-DIFF`](#ref-tor-diff-tor-versus-direct-requests) | The expected split was observed on one frozen IPv4 deployment. Qualify a fresh snapshot and ingress before use. See the [condition recipe](reference-lab/CONDITIONS.md). |
 
 ### `REF-NORMAL` Ordinary content with working navigation
 
@@ -95,8 +96,9 @@ scanner may classify a response as challenge-like, but JSONL v1 does not show
 the live challenge header or the browser outcome. Cloudflare documents a
 challenge-response header. The approved packet does not collect that header.
 Deterministic Turnstile test keys would exercise their own flow, so evidence
-for a managed challenge requires a managed challenge rule. The [offline recipe](reference-lab/CHALLENGE.md) prepares the rule and task;
-actual provider review, deployment, operator permission, and qualification remain pending.
+for a managed challenge requires a managed challenge rule. The
+[recipe](reference-lab/CHALLENGE.md) describes the rule and task. Repeat
+provider review and qualification for each new authorized deployment.
 [Cloudflare challenge-response documentation](https://developers.cloudflare.com/cloudflare-challenges/challenge-types/challenge-pages/detect-response/) · [Turnstile test documentation](https://developers.cloudflare.com/turnstile/troubleshooting/testing/)
 
 ### `REF-CLIENT` Client-dependent refusal

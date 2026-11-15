@@ -24,7 +24,8 @@ only through their specific staging recipes:
 
 Keep the source and tests; retire temporary hosting after its approved purpose.
 The [implementation checkpoint](IMPLEMENTATION-CHECKPOINT.md) records local
-verification and the separate live-qualification gates.
+verification and the separate live-qualification gates. The [qualification
+results](QUALIFICATION.md) cover the retired November 15 deployment.
 
 ## Reproduce locally
 

@@ -35,6 +35,9 @@ The later optional [Gemini review](GEMINI-REVIEW.md) had one incomplete High att
 
 ## Activation and retirement
 
+The [November 15 qualification record](QUALIFICATION.md) describes the
+subsequent temporary deployment and the Tor exit-list cutoff guard.
+
 Offline completion satisfies the construction scope of #44–46; all catalog entries remain candidates. Before selecting one for a future batch, separately approve exact browser compatibility, source freshness/coverage, provider and zone behavior, hostname/certificate choices, costs, traffic limits, private custody, and retirement dates. The address snapshot deadline is operator-enforced; nginx does not automatically expire or refresh it. If these requirements cannot be met, defer that condition.
 
 The proposed challenge hostname and provider resources are not created by this work. Close ingress and retire temporary resources at the approved end of any future deployment. Existing #41/#42 authority cannot be reused for new traffic.
