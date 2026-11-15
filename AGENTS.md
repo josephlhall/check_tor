@@ -20,3 +20,9 @@ public case descriptions may be committed. When scanner changes materially
 affect the measurement model or protocol, keep `MEASUREMENT-VALIDATION.md`
 accurate and distinguish hypotheses and planned methods from established
 findings.
+
+Write public documentation, help, and examples for readers who have access only
+to this repository. Explain research context using reviewed public facts or
+synthetic examples. Avoid unexplained downstream project/study names and private
+links, paths, or operational details. Preserve historical methods and distinguish
+observations from proposed experiments.

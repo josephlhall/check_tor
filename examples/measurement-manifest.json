@@ -1,0 +1,20 @@
+{
+  "manifest_version": 1,
+  "purpose": "Synthetic example of a paired retrieval comparison",
+  "input": {
+    "file": "input.txt",
+    "sha256": null,
+    "order": "file order"
+  },
+  "command_file": "command.json",
+  "records_file": "observations.jsonl",
+  "stderr_file": "stderr.txt",
+  "exit_status": null,
+  "runtime": {},
+  "source_and_effective_settings": "run_start in observations.jsonl",
+  "state": "prepared",
+  "source_checkout": {
+    "revision": null,
+    "scanner_sources_modified": null
+  }
+}

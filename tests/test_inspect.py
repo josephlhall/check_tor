@@ -245,12 +245,21 @@ class InspectionTests(unittest.TestCase):
             (b'{}', "missing its final newline"),
             (b'{"type":1,"type":2}\n', "duplicate JSON"),
             (b'{"x": NaN}\n', "non-JSON numeric"),
-            (b'[' * 2000 + b']' * 2000 + b'\n', "excessive nesting"),
+
         ):
             with self.subTest(expected=error):
                 self.path.write_bytes(content)
                 report = inspector.inspect_file(self.path, 0)
                 self.assertIn(error, report["errors"][0])
+        # Python 3.15 can decode deeper nesting than older CPython versions.
+        # Both paths must reject this top-level array as native evidence.
+        self.path.write_bytes(b"[" * 2000 + b"]" * 2000 + b"\n")
+        nested = inspector.inspect_file(self.path, 0)
+        self.assertEqual(nested["outcome"], "invalid")
+        self.assertTrue(any(
+            message in nested["errors"][0]
+            for message in ("excessive nesting", "record is not a JSON object")
+        ))
         for limit, error in (
             ("MAX_LINE_BYTES", "line byte limit"),
             ("MAX_INPUT_BYTES", "total byte limit"),

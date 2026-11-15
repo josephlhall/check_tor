@@ -33,6 +33,7 @@ protocol grants no authority for a new batch, endpoint deployment, or screening.
 | What would a future reference batch require? | [Reference experiment packet](VALIDATION-REFERENCE-PACKET.md) |
 | How are endpoints described and reviewed? | [Reference endpoint catalog](REFERENCE-ENDPOINTS.md) |
 | What interactions and data handling are permitted? | [Ethics and data-stewardship policy](ETHICS-AND-DATA-STEWARDSHIP.md) |
+| How can I run a controlled local experiment and inspect records? | [Experiment guide](EXPERIMENTS.md) |
 | What can today's scanner record? | [Detailed measurement output](DETAILED-OUTPUT.md) and the [README](README.md) |
 
 ## Next research steps
@@ -233,9 +234,10 @@ successful curl retrieval alone does not establish browser usability.
 For new studies, freeze the startup verification policy prospectively.
 Detailed mode defaults to one attempt; `--preflight-retry transient` allows
 three attempts with 15- and 30-second waits after eligible transport failures,
-with a 20-second limit per attempt, the independent 1 MiB cap, and global
-pacing. It requires completed successful Tor verification before any target
-work. The [finite retry policy and output contract](DETAILED-OUTPUT.md#tor-verification-and-retries)
+with the selected `--timeout-preflight` limit per attempt (default 20
+seconds), the independent 1 MiB cap, and global pacing. Freeze the timeout
+alongside the retry policy and scanner revision. The scanner requires
+completed successful Tor verification before any target work. The [finite retry policy and output contract](DETAILED-OUTPUT.md#tor-verification-and-retries)
 exclude HTTP, certificate, invalid/non-Tor response, body-cap, and local
 failures. Each preflight is recorded separately from target denominators;
 planned preflight counts are upper bounds, while terminal counts report actual

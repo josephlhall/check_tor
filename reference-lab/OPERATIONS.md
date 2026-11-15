@@ -29,6 +29,10 @@ results](QUALIFICATION.md) cover the retired November 15 deployment.
 
 ## Reproduce locally
 
+For a guided comparison with retained observations, use the
+[offline experiment runner](../EXPERIMENTS.md#run-your-first-local-example).
+The lower-level commands below expose the fixture directly.
+
 Use nginx with the HTTP TLS module, OpenSSL, Python 3.9 or newer, and the repository's normal scanner test tools on `PATH`. From the repository root:
 
 ```sh
