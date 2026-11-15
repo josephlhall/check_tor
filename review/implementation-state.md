@@ -80,4 +80,3 @@ The full source packet is archived with the raw hosted-review evidence outside
 Git. The source excerpt map, review prompt and scoring criteria remain alongside
 this record. Hosted CI and local macOS VM CI will run at the shipping checkpoint.
 No push, merge, release, issue mutation or live measurement was performed.
-
