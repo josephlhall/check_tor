@@ -17,14 +17,14 @@ Use Semantic Versioning and tag the release `vMAJOR.MINOR.PATCH`.
 - Increment PATCH for backward-compatible fixes, documentation, tests, and
   maintenance.
 
-A release can include several accepted changes. Review the full range
-since the last release before choosing the version. Replace `v1.5.0` in
-this example with the previous release tag.
+Review the full range since the last published release before choosing the
+next version. Fetch the current branch and tags, then enter the tag from the
+published release you are comparing against.
 
 ```zsh
-git fetch origin --tags
-git tag --list --sort=-version:refname
-previous_tag=v1.5.0
+git fetch origin main --tags
+gh release list --repo josephlhall/check_tor --limit 5
+read -r 'previous_tag?Previous published release tag > '
 git log --oneline "$previous_tag"..origin/main
 git diff --stat "$previous_tag"..origin/main
 ```
@@ -81,11 +81,11 @@ gh run view "$run_id" --repo josephlhall/check_tor
 
 ## Publish
 
-Replace the example `version` with the chosen tag. Create an annotated
-tag on `release_commit` and confirm it resolves to that SHA.
+Enter the chosen release tag. Create an annotated tag on `release_commit`
+and confirm it resolves to that SHA.
 
 ```zsh
-version=v1.5.1
+read -r 'version?New release tag > '
 git tag --annotate "$version" --message "check_tor $version" "$release_commit"
 git show --no-patch "$version"
 test "$(git rev-parse "refs/tags/${version}^{commit}")" = "$release_commit"
