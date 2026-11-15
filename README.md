@@ -339,6 +339,17 @@ The optional [local HTTPS reference lab](reference-lab/OPERATIONS.md) has its
 own loopback tests. nginx is a lab dependency. Routine scanner checks use the
 tools listed above.
 
+After installing nginx, run all lab fixtures with:
+
+```sh
+python3 -m unittest discover -s reference-lab -p 'test_*.py' -v
+```
+
+These exercise local HTTPS and synthetic inputs only. The optional
+[client/Tor-address conditions](reference-lab/CONDITIONS.md) and
+[managed-challenge recipe](reference-lab/CHALLENGE.md) remain candidates for
+separately approved live qualification; no public host needs to stay running.
+
 ## Releases and license
 
 Use the tagged source from [GitHub

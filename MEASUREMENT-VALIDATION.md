@@ -14,9 +14,10 @@ general accuracy or the prevalence of Tor blocking. The
 [pilot report](VALIDATION-PILOT-RESULTS.md) gives the counts and interpretation.
 
 This document explains the research direction and how to find its evidence.
-The completed studies retain their original methods. The approved next
-protocol, `TACP-0.4`, prepares reference experiments but does not authorize
-endpoint construction, outreach, screening, or collection.
+The completed studies retain their original methods. The first `TACP-0.4`
+reference batch is also complete; its [reviewed report](https://github.com/josephlhall/check_tor/issues/42)
+keeps both readable HTTP 202 scanner comparisons inconclusive. The reusable
+protocol grants no authority for a new batch, endpoint deployment, or screening.
 
 ## Find the method or evidence
 
@@ -47,18 +48,16 @@ the scanner result, such as operator documentation or a reviewed endpoint
 configuration. That prevents selecting cases merely because they yield the
 verdict being tested.
 
-The next steps are:
+[Readiness #41](https://github.com/josephlhall/check_tor/issues/41) and
+[collection/reporting #42](https://github.com/josephlhall/check_tor/issues/42)
+are complete. The temporary public HTTP 202 page has been retired.
 
-1. [Qualify a first batch in issue #41](https://github.com/josephlhall/check_tor/issues/41).
-   Select normal navigation and at least one substantive reference condition.
-   Record the exact tasks, permissions, environment, private storage, order,
-   traffic limits, and the owner's readiness decision. Conditions needing
-   construction or permission may remain deferred; construction and outreach
-   require separate authorization.
-2. [Collect and report that batch in issue #42](https://github.com/josephlhall/check_tor/issues/42)
-   only after #41's prerequisites and explicit live authority are satisfied.
-   Account for every attempted, unavailable, and halted case; audit private
-   observations and publish only reviewed, sanitized findings.
+Reusable offline recipes now cover the client-dependent condition (#44),
+Tor-address condition (#45), and real managed-challenge setup (#46). See the [reference lab handoff](reference-lab/OPERATIONS.md).
+Maintain the recipes and tests; no continuously hosted service is required.
+If a later batch is worthwhile, select its conditions and obtain fresh
+qualification, hosting, privacy, traffic, and retirement decisions before any
+live use. Unqualified conditions remain deferred.
 
 The reference packet limits the planned experiment to at most seven analytic
 cases across at most five condition endpoints. A missing condition remains
@@ -262,6 +261,7 @@ repository; it contains no response bodies or exit-IP enrichment.
 | 2026-09-07 | Issue #33 completed the stratified 26-case manual pilot, private review, and public calibration report under `TACP-0.2`. | [Manifest](VALIDATION-PILOT-MANIFEST.md) and [results](VALIDATION-PILOT-RESULTS.md) |
 | 2026-09-25 | Issue #39 completed the prospective `TACP-0.3` method and reference-condition preparation. | [Original protocol](https://github.com/josephlhall/check_tor/blob/ec80623c2ec737ee2aecfc70eae99ca8e02bf602/VALIDATION-REFERENCE-PROTOCOL.md) and [packet](https://github.com/josephlhall/check_tor/blob/ec80623c2ec737ee2aecfc70eae99ca8e02bf602/VALIDATION-REFERENCE-PACKET.md) |
 | 2026-11-07 | The owner approved `TACP-0.4` for future observations, clarifying timing and comparison by browser outcome category. | [Revision history](VALIDATION-REFERENCE-PROTOCOL.md#revision-history) |
+| 2026-11-14 | The first `TACP-0.4` batch and a separately authorized HTTP 202 repeat completed. Normal navigation agreed; both 202 scanner comparisons were inconclusive because startup failed before the target requests. | [Reviewed sanitized report](https://github.com/josephlhall/check_tor/issues/42) |
 
 The five-case dry run tested whether the procedure could be followed and what
 fields were missing. It was not an accuracy study. The subsequent pilot used

@@ -301,11 +301,25 @@ the human reviewer determines that doing so is safe and useful.
 The [local reference lab](reference-lab/OPERATIONS.md) provides constructed
 normal-navigation and readable HTTP 202 examples. Each is a local fixture.
 A public deployment needs its own catalog record, operator authorization, and
-current qualification under issue #41.
+current qualification in a new batch-specific readiness manifest. The completed
+#41/#42 authority does not cover future deployments or requests.
 
 The completed issue #32 dry run did not build controlled infrastructure. New
 construction needs separate scope and authorization. A desired row may remain
 unfilled rather than expanding a study to obtain it.
+
+## Offline reference candidates
+
+These are versioned construction recipes, not currently qualified public
+endpoints. All three remain `candidate`; no live request or browser outcome is
+established by their synthetic tests. A future deployment needs a complete
+catalog record using the schema above and a new approved manifest.
+
+| Condition | Recipe and independent expectation | Still needed before selection |
+|---|---|---|
+| `REF-CLIENT` | [Exact browser-navigation header rule and harmless task](reference-lab/CONDITIONS.md) | Trusted HTTPS endpoint, exact unmodified browser profiles and both task requests qualified, operator and traffic approval |
+| `REF-TOR-DIFF` | [Frozen address-membership rule and harmless task](reference-lab/CONDITIONS.md) | Reviewed fresh source, supported family/coverage, actual origin-address handling, frozen batch deadline, operator and traffic approval |
+| `REF-CHALLENGE` | [Scoped managed-challenge rule and harmless task](reference-lab/CHALLENGE.md) | Actual account/plan and zone review, approved temporary hostname/origin, contemporaneous qualification with explicit evidence limits |
 
 ## Case selection gate
 

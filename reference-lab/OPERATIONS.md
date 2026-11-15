@@ -10,6 +10,22 @@ The lab serves fixed examples for the [TACP-0.4 reference study](../VALIDATION-R
 
 The accepted page represents a fixed example with no asynchronous job, redirect, form, script, cookie, or external asset. The scanner's existing classifier maps HTTP 202 to `CHALLENGE`. The local tests establish the status independently of that verdict. A future browser observation would establish whether the person could complete the task. The approved JSONL v1 instrument has no structured HTTP status or headers.
 
+## Optional conditions
+
+The baseline exposes only the three routes above. Enable additional routes
+only through their specific staging recipes:
+
+- [Client and Tor-address conditions](CONDITIONS.md): refuse requests without
+  the selected browser-navigation header, or apply a frozen address-membership
+  rule. They are separate mechanisms with separate qualification requirements.
+- [Managed-challenge recipe](CHALLENGE.md): put the harmless task behind a
+  narrowly scoped real provider rule during an approved deployment window.
+  Local tests establish rule scope and origin content, not live challenge behavior.
+
+Keep the source and tests; retire temporary hosting after its approved purpose.
+The [implementation checkpoint](IMPLEMENTATION-CHECKPOINT.md) records local
+verification and the separate live-qualification gates.
+
 ## Reproduce locally
 
 Use nginx with the HTTP TLS module, OpenSSL, Python 3.9 or newer, and the repository's normal scanner test tools on `PATH`. From the repository root:
@@ -59,7 +75,7 @@ Stop the foreground process with Ctrl-C. Keep the disposable certificate out of 
 
 - One nginx worker with 64 connection slots, no upstreams, and no keep-alive. TLS uses versions 1.2 and 1.3 with session caching and tickets disabled. HTTPS is the only listener in the fixture.
 - Header reads have a five-second deadline. nginx uses a 1 KiB initial header buffer and at most two 4 KiB large buffers. Body-bearing requests are rejected and no request body is used by a handler. The 1 KiB nginx body limit also applies where body-size checking runs.
-- Only GET and HEAD are served. Unknown routes return 404. Response bodies are fixed, and each successful page is under 1 KiB. The five-second send timeout limits time between writes. Connection draining after a rejected request is limited to five seconds.
+- Only GET and HEAD are served. Unsupported methods return 405 and body-bearing requests return 400 before route lookup; other unknown routes return 404. Response bodies are fixed, and each successful page is under 1 KiB. The five-second send timeout limits time between writes. Connection draining after a rejected request is limited to five seconds.
 - The server serves no filesystem tree, accepts no uploads, and exposes no proxy, resolver, or admin endpoint. Access logging is disabled and nginx error logging goes to the null device. Keep only bounded service lifecycle diagnostics in the host journal. Review cloud, firewall, and platform logging separately before any live use.
 
 ## Deployment action card
@@ -82,8 +98,22 @@ The starting configuration is loopback only. The following is a proposal for a l
 4. Before enabling public access, verify the effective nginx configuration, TLS chain, exact routes, no default service or unexpected listeners, firewall scope, request and resource limits, and private administration. Check the service restarts after reboot. Separately authorized smoke checks can establish public TLS and expected status and body from the approved routes, including reachability from Tor exits. Record the exact destinations, budget, and review result. Any unexpected status, edge behavior, public admin access, or resource use stops qualification.
 5. On failure, close public ingress first. Restore the last reviewed files and certificate, validate, restart, and recheck under the approved budget. At retirement, close ingress, stop and disable the service, remove the DNS records, retire the dedicated key and any renewal credential, and destroy the VM and any associated resources. Record the teardown date and billing check. Keep the reviewed source and sanitized operator notes for rebuild.
 
-## Qualification handoff for issue #41
+## Qualification handoff for a future batch
 
-The local routes are constructed fixtures. `/accepted` supplies the intended R02 `REF-202` behavior once a specific deployed endpoint is reviewed. The lab's normal route is a separate candidate. The first-batch proposal currently names `HTTPBIN-LINKS-2` for R01.
+The first batch and its separately approved same-endpoint repeat are complete.
+Both HTTP 202 scanner-to-browser comparisons remain inconclusive; see the
+[reviewed #42 report](https://github.com/josephlhall/check_tor/issues/42).
+The temporary public 202 page was retired. These local routes are reusable
+fixtures, not currently qualified public endpoints.
 
-Provide #41 with the exact approved HTTPS URL and catalog ID, source and deployment configuration revisions, independently checked terminal status and visible completion criteria, operator authority and contact, verification date, redirect and resource review, lower traffic limits, and retirement conditions. Record any publication sensitivity and deployment or eligibility traffic approval in the readiness manifest. Live collection follows the separate #42 decision. [Readiness issue #41](https://github.com/josephlhall/check_tor/issues/41) · [Collection issue #42](https://github.com/josephlhall/check_tor/issues/42) · [Stewardship policy](../ETHICS-AND-DATA-STEWARDSHIP.md)
+Maintain the source, tests, and rebuild/teardown recipes. There is no commitment
+to keep a host running. Activate only the conditions selected by a separately
+approved future batch, then retire the temporary resources at the agreed end.
+
+Provide that batch's readiness manifest with the exact approved HTTPS URL and
+catalog ID, source and deployment configuration revisions, independently
+checked terminal status and visible completion criteria, operator authority
+and contact, verification date, redirect and resource review, lower traffic
+limits, and retirement conditions. Record publication sensitivity and the
+specific deployment and qualification traffic approval. The completed #41/#42
+authority is not reused. [Stewardship policy](../ETHICS-AND-DATA-STEWARDSHIP.md)
