@@ -165,6 +165,7 @@ usage() {
     print -r -- "  --timeout-first SECONDS   First Tor attempt, 1–3600 (default: 180)."
     print -r -- "  --timeout-retry SECONDS   Later Tor attempts, 1–3600 (default: 180)."
     print -r -- "  --timeout-clearnet SECONDS  Clearnet control, 1–3600 (default: 20)."
+    print -r -- "  --timeout-preflight SECONDS  Each Tor startup check, 1–3600 (default: 20)."
     print -r -- "  --no-clearnet             Skip the clearnet control comparison."
     print -r -- "  -h, --help                Show this help and exit."
     print -r -- ""
@@ -402,16 +403,17 @@ probe() {
 }
 
 # Parse and validate the complete invocation before any dependency check or
-# network access. REPLY is the target file for legacy/source callers; reply is
-# the ordered configuration tuple consumed by main. Keep that tuple and main's
-# dynamically scoped locals in lockstep when adding a setting.
+# network access. Sourced callers use REPLY for the target file and reply for
+# the existing configuration tuple. Return the preflight timeout separately
+# so those callers can still rely on the tuple's shape.
 parse_args() {
     local output_format=text target_file="" argument
     local proxy=$TOR_PROXY circuits=$MAX_CIRCUITS
     local max_redirects=$MAX_REDIRECTS max_body_bytes=$MAX_BODY_BYTES
     local timeout_first=$TIMEOUT_FIRST timeout_retry=$TIMEOUT_RETRY
     local timeout_clearnet=$TIMEOUT_CLEARNET clearnet_enabled=$CLEARNET_ENABLED
-    REPLY="" reply=()
+    local timeout_preflight=$PREFLIGHT_TIMEOUT
+    REPLY="" reply=() reply_timeout_preflight=""
     if (( $# == 1 )) && [[ "$1" == (-h|--help) ]]; then
         usage
         return 2
@@ -437,6 +439,19 @@ parse_args() {
                 fi
                 parse_body_limit "$body_limit_value" || return 1
                 max_body_bytes=$REPLY
+                ;;
+            --timeout-preflight|--timeout-preflight=*)
+                local timeout_value=${argument#*=}
+                if [[ $argument == --timeout-preflight ]]; then
+                    shift
+                    if (( $# == 0 )); then
+                        print -u2 -r -- "Error: --timeout-preflight requires a value."
+                        return 1
+                    fi
+                    timeout_value=$1
+                fi
+                parse_bounded_integer "$timeout_value" --timeout-preflight 3600 || return 1
+                timeout_preflight=$REPLY
                 ;;
             --proxy|--circuits|--max-redirects|--timeout-first|--timeout-retry|--timeout-clearnet)
                 local option_name=$argument
@@ -557,6 +572,7 @@ parse_args() {
     reply=("$target_file" "$output_format" "$proxy" "$circuits" \
            "$timeout_first" "$timeout_retry" "$timeout_clearnet" "$clearnet_enabled" \
            "$max_redirects" "$max_body_bytes")
+    reply_timeout_preflight=$timeout_preflight
 }
 
 load_targets() {
@@ -766,7 +782,7 @@ run_scan() {
 # callers load the reusable definitions without starting a scan.
 main() {
     setopt localoptions localtraps
-    local parse_status target_file
+    local parse_status target_file reply_timeout_preflight
     local -a scan_targets
 
     # Keep the established CLI/parser and its source-callable contract intact.
@@ -821,6 +837,7 @@ main() {
     local OUTPUT_FORMAT=${reply[2]} TOR_PROXY=${reply[3]} MAX_CIRCUITS=${reply[4]}
     local TIMEOUT_FIRST=${reply[5]} TIMEOUT_RETRY=${reply[6]}
     local TIMEOUT_CLEARNET=${reply[7]} CLEARNET_ENABLED=${reply[8]}
+    local PREFLIGHT_TIMEOUT=$reply_timeout_preflight
     local MAX_REDIRECTS=${reply[9]} MAX_BODY_BYTES=${reply[10]}
 
     load_targets "$target_file" || return 1

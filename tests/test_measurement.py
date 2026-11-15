@@ -669,19 +669,24 @@ class MeasurementTests(unittest.TestCase):
         )
         self.assertTrue(any(call["proxy_env"]["HTTPS_PROXY"] for call in self.calls()))
 
-    def test_preflight_retry_option_preserves_inherited_routing(self):
+    def test_preflight_options_preserve_inherited_routing(self):
         environment = {
             "HTTPS_PROXY": "http://ambient.example.test:9876",
             "NO_PROXY": "*",
         }
-        for policy in ("none", "transient"):
-            with self.subTest(policy=policy):
+        for options, policy, timeout in (
+            (("--preflight-retry", "none"), "none", 20),
+            (("--preflight-retry", "transient"), "transient", 20),
+            (("--timeout-preflight=00001",), "none", 1),
+        ):
+            with self.subTest(options=options):
                 self.clear_logs()
                 status, rows, error = self.run_scan(
-                    "--preflight-retry", policy, env=environment
+                    *options, env=environment
                 )
                 self.assertEqual(status, 0, error)
                 self.assertEqual(rows[0]["settings"]["preflight_retry"], policy)
+                self.assertEqual(self.curl_timeouts(), [str(timeout), "180"])
                 starts = self.select(rows, "attempt_start")
                 self.assertEqual([row["phase"] for row in starts], ["preflight", "target"])
                 for row in starts:
@@ -896,7 +901,7 @@ class MeasurementTests(unittest.TestCase):
     def test_preflight_retry_recovers_and_accounts_each_attempt(self):
         status, rows, launches, waits = self.run_preflight_engine(
             {"preflight": [{"exit": 35, "code": "000"}, {}]},
-            "--control", "never", "--start-gap", "20",
+            "--control", "never", "--start-gap", "20", "--timeout-preflight", "61",
         )
         self.assertEqual(status, 0)
         self.assertEqual([phase for phase, _ in launches], ["preflight", "preflight", "target"])
@@ -906,20 +911,24 @@ class MeasurementTests(unittest.TestCase):
         self.assertEqual([r["preflight_retryable"] for r in preflights], [True, False])
         self.assertEqual([r["preflight_reason"] for r in preflights], ["transport_failure", "verified"])
         self.assertEqual(len({r["attempt_id"] for r in preflights}), 2)
+        for row in self.select(rows, "attempt_start", "preflight") + preflights:
+            self.assertEqual(row["requested_timeout"], 61)
         for row in preflights:
             self.assertTrue(row["started_at"])
             self.assertTrue(row["ended_at"])
-            self.assertEqual(row["requested_timeout"], 20)
             self.assertIsNone(row["trial_id"])
             self.assertIsNone(row["pair_id"])
         self.assertEqual(rows[0]["planned"]["preflight_requests"], 3)
-        self.assertEqual(rows[0]["settings"]["preflight_retry_delays"], [15, 30])
+        settings = rows[0]["settings"]
+        self.assertEqual(settings["timeout_preflight"], 61)
+        self.assertEqual(settings["request_profile"]["preflight_timeout"], 61)
+        self.assertEqual(settings["preflight_retry_delays"], [15, 30])
         end = self.assert_accounting(rows)
         self.assertEqual(end["counts"]["preflight"], {"issued": 2, "completed": 2})
         self.assertEqual(end["verdict_counts"], {"tor": {"PASS": 1}, "direct": {}})
         self.assertLessEqual(max(waits), 0.02)
+        self.assertEqual(self.curl_timeouts(), ["61", "61", "180"])
         for call in self.calls()[:2]:
-            self.assertEqual(call["args"][call["args"].index("--max-time") + 1], "20")
             self.assertIn("--socks5-hostname", call["args"])
             self.assertNotIn("-k", call["args"])
 
@@ -990,17 +999,43 @@ class MeasurementTests(unittest.TestCase):
                 self.assertEqual(end["counts"]["target"]["issued"], 0)
 
     def test_preflight_timeout_is_reported_without_target_requests(self):
-        status, rows, error = self.run_scan(
-            plan={"preflight": [{"exit": 28, "code": "000"}]}
-        )
-        message = "Tor startup check timed out after 20 seconds."
-        self.assertEqual(status, 1)
-        self.assertIn(message, error)
-        self.assertEqual(self.curl_timeouts(), ["20"])
-        self.assertEqual([call["url"] for call in self.calls()], [PREFLIGHT])
-        end = self.assert_accounting(rows)
-        self.assertEqual(end["error"], message)
-        self.assertEqual(end["counts"]["target"]["issued"], 0)
+        for options, timeout in (((), 20), (("--timeout-preflight=3600",), 3600)):
+            with self.subTest(timeout=timeout):
+                self.clear_logs()
+                status, rows, error = self.run_scan(
+                    *options,
+                    env={"CHECK_TOR_PREFLIGHT_TIMEOUT": "invalid ambient value"},
+                    plan={"preflight": [{"exit": 28, "code": "000"}]},
+                )
+                message = f"Tor startup check timed out after {timeout} seconds."
+                self.assertEqual(status, 1)
+                self.assertIn(message, error)
+                self.assertEqual(self.curl_timeouts(), [str(timeout)])
+                self.assertEqual([call["url"] for call in self.calls()], [PREFLIGHT])
+                settings = rows[0]["settings"]
+                self.assertEqual(settings["timeout_preflight"], timeout)
+                self.assertEqual(settings["request_profile"]["preflight_timeout"], timeout)
+                end = self.assert_accounting(rows)
+                self.assertEqual(end["error"], message)
+                self.assertEqual(end["counts"]["target"]["issued"], 0)
+                self.assert_clean()
+
+    def test_invalid_preflight_timeout_never_launches_curl(self):
+        for options in (
+            ("--timeout-preflight", "--"),
+            ("--timeout-preflight=",),
+            ("--timeout-preflight=0",),
+            ("--timeout-preflight=-1",),
+            ("--timeout-preflight=1.5",),
+            ("--timeout-preflight=3601",),
+            ("--timeout-preflight=99999999999999999999",),
+        ):
+            with self.subTest(options=options):
+                status, rows, error = self.run_scan(*options)
+                self.assertEqual(status, 2, error)
+                self.assertIn("--timeout-preflight", error)
+                self.assertEqual(rows, [])
+        self.assertEqual(self.calls(), [])
         self.assert_clean()
 
     def test_preflight_default_and_invalid_policy_never_retry(self):

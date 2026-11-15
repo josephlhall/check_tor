@@ -138,6 +138,13 @@ def arguments(argv):
         metavar="SECONDS",
         help="direct control, 1 to 3600 seconds (default: %(default)s)",
     )
+    p.add_argument(
+        "--timeout-preflight",
+        type=bounded_int(3600),
+        default=20,
+        metavar="SECONDS",
+        help="each Tor startup check, 1 to 3600 seconds (default: %(default)s)",
+    )
     p.add_argument("--no-clearnet", action="store_true")
     p.add_argument(
         "--preflight-retry", choices=["none", "transient"], default="none",
@@ -652,6 +659,7 @@ class Engine:
         self.env["CHECK_TOR_PROXY"] = args.proxy
         self.env["CHECK_TOR_MAX_REDIRECTS"] = str(args.max_redirects)
         self.env["CHECK_TOR_MAX_BODY_BYTES"] = str(args.max_body_bytes)
+        self.env["CHECK_TOR_PREFLIGHT_TIMEOUT"] = str(args.timeout_preflight)
         # Alter stdout only after other initialization succeeds; run() always
         # restores its original flags, including when main was called by Zsh.
         self.writer = Writer(
@@ -683,6 +691,7 @@ class Engine:
             "timeout_first",
             "timeout_retry",
             "timeout_clearnet",
+            "timeout_preflight",
         )
         settings = {n: getattr(self.args, n) for n in names}
         settings["preflight_retry_delays"] = (
