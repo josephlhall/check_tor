@@ -59,9 +59,9 @@ for response_file in "$BODY" "$HDRS" "$LASTH" "$BODY.curl-status" "$BODY.sink-st
 done
 verified=null result_verdict=null result_detail=null local_error=null
 if [[ $phase == preflight ]]; then
-    # This request deliberately retains the legacy preflight HTTP behavior:
-    # no redirects/browser headers, exactly one Tor API check. The bounded
-    # private sink prevents retaining an unlimited unexpected response.
+    # Each adapter invocation makes one Tor API request without redirects or
+    # browser headers. The coordinator owns retry timing and eligibility. The
+    # bounded private sink limits what an unexpected response can leave on disk.
     typeset -a preflight_via=()
     [[ $reproducible == 1 ]] && preflight_via=(--noproxy '')
     metadata=$(probe_curl -q -s -o >(probe_body_sink "$PREFLIGHT_BODY_BYTES") \
