@@ -17,27 +17,35 @@ not affiliated with or endorsed by [The Tor Project](https://www.torproject.org/
 
 ## Run your first scan
 
-From a checkout of this repository, install and start Tor for your platform.
+### Install and start Tor
+
+Open a terminal in a checkout or an extracted [tagged release](https://github.com/josephlhall/check_tor/releases).
 The scanner needs Zsh and curl on `PATH`, plus the standard utilities `awk`,
 `grep`, `head`, `cut`, `tr`, `wc`, and `mktemp`.
 
-**macOS with Homebrew**
+Install and start Tor on **macOS with Homebrew**.
 
 ```zsh
 brew install tor
 brew services start tor
 ```
 
-**Debian or Ubuntu, including a ChromeOS Linux environment that runs services**
+Use these commands on **Debian or Ubuntu**, including in a ChromeOS Linux
+environment that runs services.
 
 ```zsh
 sudo apt update && sudo apt install zsh tor curl
 sudo service tor start
 ```
 
-The default SOCKS address is `localhost:9050`. Keep the files in the checkout
-together so the entry point can load its helper files. Put your target list in
-a private directory outside the repository.
+The scanner connects to Tor’s SOCKS proxy at `localhost:9050` by default. If your Tor
+service listens elsewhere, pass `--proxy HOST:PORT` when you run the scan.
+
+### Prepare a private target list
+
+Keep `check_tor.zsh` and its helper files together. Store your list of sites in
+a private directory outside the source tree. From the scanner directory, make
+a private copy of the example list.
 
 ```zsh
 umask 077
@@ -45,29 +53,36 @@ mkdir -p "$HOME/tor-targets"
 cp -i targets-EXAMPLE.txt "$HOME/tor-targets/mylist.txt"
 ```
 
-Edit the copy with your preferred editor. Supply one readable file with a
-domain or URL on each line. The scanner trims whitespace, skips blank lines
-and lines beginning with `#`, and rejects a list with no targets. It adds
-`https://` to bare targets and upgrades an initial `http://` to `https://`.
-Curl can then follow redirects from that starting URL.
+Edit the copy and put one domain or URL on each line. Blank lines and lines
+starting with `#` are ignored. The scanner trims whitespace and requires at
+least one target. It adds `https://` to bare targets and rewrites an initial
+`http://` to `https://`. Curl can follow redirects from that starting URL.
 
-Run the scanner with your target list:
+### Run the scan
+
+Pass the path to your target list.
 
 ```zsh
 ./check_tor.zsh "$HOME/tor-targets/mylist.txt"
 ```
 
-Curl verifies HTTPS certificates using its configured trust store. Keep curl
-and that store updated. If you need a custom CA bundle, set `CURL_CA_BUNDLE`
-and, where applicable, `SSL_CERT_FILE` or `SSL_CERT_DIR`. The scanner ignores
-`.curlrc`, so settings in that file do not affect its requests.
+Before requesting your targets, the scanner checks that its proxy reaches
+Tor by contacting `check.torproject.org`. Some target results then trigger a
+[comparison outside the configured Tor proxy](#retries-and-comparisons).
+Add `--no-clearnet` to skip that comparison.
 
-The scanner first makes a request to `check.torproject.org` to verify
-that the SOCKS proxy reaches the Tor network before probing your targets.
-When finished, use `brew services stop tor` on macOS or
-`sudo service tor stop` on Debian or Ubuntu if you started Tor for this scan.
+If you started Tor for this scan, stop it afterward with
+`brew services stop tor` on macOS or `sudo service tor stop` on Debian or Ubuntu.
 
 ## Read the results
+
+Start with the verdict next to each target. For example, `FAIL` means curl
+received HTTP 401 or 403 without a recognized challenge signature. If the
+comparison request returned `PASS`, the sampled Tor request fared worse.
+Open the site in Tor Browser if you need to know whether a person can
+complete a task.
+
+### Retries and comparisons
 
 In the default scan, the scanner retries `FAIL`, `CHALLENGE`, `RATELIMIT`,
 `DROP`, `TIMEOUT`, and `SOCKS` up to the attempt limit. Each Tor attempt uses
@@ -85,12 +100,10 @@ direct access. Detailed mode can [set both routes
 explicitly](DETAILED-OUTPUT.md#routing-and-request-configuration).
 
 The comparison ranks `PASS` as least severe, then `CHALLENGE` and `RATELIMIT`,
-then `FAIL`, `DROP`, `TIMEOUT`, and `SOCKS`. A `CERT` or `WARN` control is
-inconclusive. For example, a Tor `FAIL` and a comparison `PASS` show that the
-sampled Tor request fared worse. They leave the site's general policy and
-the experience of a person using Tor Browser open. The text summary lists
-both Tor-worse and inconclusive comparisons under “Likely blocking or
-challenging Tor” for manual review.
+then `FAIL`, `DROP`, `TIMEOUT`, and `SOCKS`. A `CERT` or `WARN` comparison is
+inconclusive. The text summary groups targets where Tor fared worse and
+targets with inconclusive comparisons under “Likely blocking or challenging
+Tor”. Check the details for the reason each target appears there.
 
 ### Output legend
 
@@ -130,19 +143,12 @@ scan. The following options apply to ordinary scans and detailed measurements.
 | `--timeout-clearnet N` | `20` | Comparison request's timeout in seconds, from 1 to 3600. |
 | `--no-clearnet` | Comparison enabled | Skip the comparison request. Tor specificity then remains unknown. |
 
-The 180-second Tor timeouts give slow requests more time to finish and can
-increase scan duration. Preliminary Field Station Gold 1 measurements compared
-Tor and direct access across 785 civil-society and technology organization
-hostnames. The beta configuration appears to have produced more successful
-observations. It raised the route budget from 60 to 180 seconds, the redirect
-limit from one to ten, and the response-body limit from 1 MiB to 10 MiB. The
-comparison cannot isolate the effect of the timeout. A completed curl request
-documents what the scanner could retrieve under those settings. Assessing
-usability requires a separate observation in Tor Browser.
+### Timeouts and request limits
 
-Record the effective timeouts when comparing runs. Tor preflight has a
-separate, fixed 20-second timeout. If curl reports a timeout during Tor
-verification, the scanner identifies it on stderr.
+The 180-second Tor target timeouts give slow requests more time to finish and
+can increase scan duration. Record the effective timeouts when comparing
+runs. The startup check for Tor (the preflight) has a separate, fixed
+20-second timeout. The scanner reports a preflight timeout on stderr.
 
 The redirect budget excludes the initial request. With `--max-redirects 1`,
 curl can reach the first redirect destination. If that destination sends
@@ -161,6 +167,13 @@ even when curl reports HTTP 200. Larger caps can increase download and
 inspection time and temporary disk use, especially with concurrent workers.
 Request timeouts still apply. Tor preflight has its own fixed 1 MiB cap and
 fails verification if it reaches that cap.
+
+### HTTPS certificate verification
+
+Curl verifies HTTPS certificates using its configured trust store. Keep curl
+and that store updated. If you need a custom CA bundle, set `CURL_CA_BUNDLE`
+and, where applicable, `SSL_CERT_FILE` or `SSL_CERT_DIR`. The scanner ignores
+`.curlrc`, so settings in that file do not affect its requests.
 
 ### Text and JSON Lines v1
 
@@ -206,7 +219,8 @@ specific schedule for Tor and direct comparisons. This mode requires Python
 3.9 or newer and uses only its standard library. This example schedules three
 Tor/direct pairs per target, starting each pair with Tor.
 
-Explicit scheduling options make direct probes bypass ambient proxies.
+The scheduling options in this example make the direct requests bypass
+proxies set in the environment.
 
 ```zsh
 ./check_tor.zsh --format jsonl-v2 --trials 3 \
@@ -223,18 +237,15 @@ Direct requests can reveal your ordinary connection to target sites. Repeated tr
 share a Tor exit and other conditions, so treat them as repeated observations
 rather than independent samples.
 
-The optional `--execution-policy paired-cautious` gives ready second members
-of pairs priority. If either route observes a completed HTTP 429, the scanner
-stops pending work for that input hostname and continues other hostnames.
-With fixed trials and always-on per-trial controls, add
-`--rate-limit-stop after-pair` to allow only the other route of that same
-pair if it has yet to start. The default `immediate` stops that partner too.
-The opt-in may start the partner before a received `Retry-After` interval
-elapses. HTTP does not guarantee an exemption for a different route.
-The scanner records the work it omits. An otherwise successful run with omissions
-exits `3` with `state: "policy_stopped"` and `complete: false`. The default
-`legacy` policy retains the existing schedule. Before opting in, check that
-your JSONL v2 reader accepts the new terminal state and exit code.
+The optional `--execution-policy paired-cautious` prioritizes finishing
+started pairs. After a completed HTTP 429 on either route, it stops pending
+work for that hostname and continues with other hostnames. With fixed trials
+and a comparison on every trial, `--rate-limit-stop after-pair` lets the
+other request in the same pair start if it was still waiting.
+A run that otherwise succeeds but omits work exits `3` and records
+`state: "policy_stopped"` with `complete: false`. Check the
+[cautious policy reference](DETAILED-OUTPUT.md#cautious-collection-and-completion)
+before enabling it in an automated workflow.
 
 See the [detailed output reference](DETAILED-OUTPUT.md) for the scheduling
 options, routing guarantees, record fields, and how to interpret partial runs.
@@ -248,17 +259,9 @@ second attempt and 30 seconds before the third; each request retains its
 20-second timeout and fixed 1 MiB body cap. Global `--start-gap` pacing also
 applies. Targets start only after completed, valid Tor verification.
 
-Curl must explicitly report no HTTP response (`000`) and exit with `5`, `6`,
-`7`, `28`, `35`, `52`, `55`, or `56` for a retry. Failures with missing or
-malformed HTTP write-out stop immediately, as do certificate errors, HTTP
-errors, invalid or non-Tor results, body-cap exhaustion, and local failures. Cancellation
-interrupts waits. The policy applies only to startup verification and uses
-the run's existing proxy settings and certificate checks.
-`--preflight-retry none` selects one attempt. Both values require JSONL v2.
-
-Each issued verification has its own JSONL v2 attempt records. Consumers that
-assume exactly one preflight must support the [opt-in contract
-extension](DETAILED-OUTPUT.md#tor-verification-and-retries) before selecting it.
+Retries apply to specified transport errors when curl reports no HTTP
+response. See [Tor verification and retries](DETAILED-OUTPUT.md#tor-verification-and-retries)
+for the eligible errors and the records a JSONL v2 reader needs to handle.
 
 ## Handling target lists
 
@@ -289,6 +292,17 @@ selected cases. Estimating accuracy or blocking prevalence across sites
 would require a different sample. See the [pilot
 results](VALIDATION-PILOT-RESULTS.md) and [measurement
 roadmap](MEASUREMENT-VALIDATION.md) for methods, limits, and follow-up.
+The [reference lab qualification](reference-lab/QUALIFICATION.md) records a
+later, separate set of checks on controlled examples.
+
+### Background on the Tor timeouts
+
+Preliminary Field Station Gold 1 measurements compared Tor and direct access
+across 785 civil-society and technology organization hostnames. The beta
+configuration appears to have produced more successful observations. It
+raised the route budget from 60 to 180 seconds, the redirect limit from one
+to ten, and the response-body limit from 1 MiB to 10 MiB. The comparison
+cannot isolate the effect of the timeout.
 
 ## Testing
 
@@ -345,10 +359,10 @@ After installing nginx, run all lab fixtures with:
 python3 -m unittest discover -s reference-lab -p 'test_*.py' -v
 ```
 
-These exercise local HTTPS and synthetic inputs only. The optional
-[client/Tor-address conditions](reference-lab/CONDITIONS.md) and
-[managed-challenge recipe](reference-lab/CHALLENGE.md) remain candidates for
-separately approved live qualification; no public host needs to stay running.
+These tests use local HTTPS and synthetic inputs. The
+[browser-header and Tor-address conditions](reference-lab/CONDITIONS.md) and
+[managed-challenge recipe](reference-lab/CHALLENGE.md) use temporary hosting
+when separately approved for a live run.
 
 ## Releases and license
 

@@ -81,14 +81,17 @@ Stop the foreground process with Ctrl-C. Keep the disposable certificate out of 
 
 ## Deployment action card
 
-The starting configuration is loopback only. The following is a proposal for a later, separately authorized deployment.
+The starting configuration listens only on loopback. This action card
+describes a temporary host for the baseline routes above. To add an optional
+condition, follow its [separate recipe](#optional-conditions) and use the
+traffic budget approved for that case.
 
 | Decision | Proposed scope |
 |---|---|
 | Host and budget | One disposable, dedicated Linux VM with 1 vCPU, 1 GiB memory, a 25 GiB boot disk, and its bundled public address. As an example checked on 2026-11-13, DigitalOcean lists its regular 1 GiB Basic plan at about US$0.00893/hour or US$6/month with a listed 1,000 GiB monthly transfer allowance. Refresh the region, available plan, prorated transfer allowance, taxes, and all line items before purchase. Use no paid backup, snapshot, extra volume, or reserved IP for the baseline. Approve the spending cap and destruction date separately. [Plan pricing](https://www.digitalocean.com/pricing/droplets) · [Billing and transfer rules](https://docs.digitalocean.com/products/droplets/details/pricing/) |
 | Public and private access | Approve one dedicated hostname and its address records, with TCP 443 open to the public so Tor exits can reach the service. Use a dedicated private management path or provider console. Keep public SSH and unrelated ports closed. Publish an AAAA record only if IPv6 reachability and firewall rules are verified. Avoid shared production hostnames, credentials, target lists, and routes into unrelated private networks. |
 | TLS and maintenance | Approve the DNS and certificate actions for the dedicated hostname. DNS-01 can keep port 80 closed. Use a narrowly scoped credential for the validation record, preferably held off the web host. Record certificate expiry, renewal owner and schedule, and the certificate reload procedure. [ACME challenge types](https://letsencrypt.org/docs/challenge-types/) |
-| Traffic accounting | For R02, allow at most one scanner invocation, one Tor verification request, up to three Tor target attempts and one conditional direct probe, and two browser loads plus up to two qualifying reloads total. Navigation is absent. Record redirects, browser auxiliary requests, and any lower endpoint limit at readiness. Budget admin traffic, OS updates, DNS and certificate validation, and any approved smoke checks separately from analytic cases. Review transfer from provider aggregates without retaining visitor IP addresses or request logs. |
+| Traffic accounting | In the approved readiness manifest, list the exact scanner and browser actions, including any link clicks, reloads, and auxiliary requests the case permits. Budget admin traffic, OS updates, DNS and certificate validation, and approved smoke checks separately. Review transfer from provider aggregates without retaining visitor IP addresses or request logs. |
 | Cleanup | Schedule closure of public access, DNS cleanup, credential retirement, and destruction of the VM and any attached billable resource. Powering off a bundled VM keeps compute billing active. Verify that the provider shows the resources deleted. [Billing rules](https://docs.digitalocean.com/products/droplets/details/pricing/#bundled-cpu-droplet-billing) |
 
 ### Rebuild and verify after authorization

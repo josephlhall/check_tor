@@ -28,12 +28,19 @@ protocol grants no authority for a new batch, endpoint deployment, or screening.
 | What procedure and fields governed that pilot? | [Frozen `TACP-0.2` protocol](VALIDATION-PROTOCOL.md) |
 | What did the earlier five-case dry run change? | [Dry-run evidence and freeze decision](VALIDATION-DRY-RUN.md) |
 | What rules would govern the next reference observations? | [Prospective `TACP-0.4` protocol](VALIDATION-REFERENCE-PROTOCOL.md) |
-| Which reference conditions are planned, and what remains to prepare? | [Reference experiment packet](VALIDATION-REFERENCE-PACKET.md) |
+| What did the first reference batch find? | [Reviewed batch report](https://github.com/josephlhall/check_tor/issues/42) |
+| What happened in the later controlled lab checks? | [Sanitized lab qualification results](reference-lab/QUALIFICATION.md) |
+| What would a future reference batch require? | [Reference experiment packet](VALIDATION-REFERENCE-PACKET.md) |
 | How are endpoints described and reviewed? | [Reference endpoint catalog](REFERENCE-ENDPOINTS.md) |
 | What interactions and data handling are permitted? | [Ethics and data-stewardship policy](ETHICS-AND-DATA-STEWARDSHIP.md) |
 | What can today's scanner record? | [Detailed measurement output](DETAILED-OUTPUT.md) and the [README](README.md) |
 
 ## Next research steps
+
+The first reference batch used normal navigation and a readable HTTP 202
+page. A separate 202 repeat followed. Both 202 scanner comparisons remain
+inconclusive. The preparation packet describes a wider set of conditions for
+future use.
 
 [Issue #39](https://github.com/josephlhall/check_tor/issues/39) completed the
 `TACP-0.3` protocol and reference packet, approved on 2026-09-25. The owner

@@ -298,8 +298,9 @@ entry and its endpoint belong only in the approved private structured store.
 This public file may report only a sanitized behavior-family description when
 the human reviewer determines that doing so is safe and useful.
 
-The [local reference lab](reference-lab/OPERATIONS.md) provides constructed
-normal-navigation and readable HTTP 202 examples. Each is a local fixture.
+The [local reference lab](reference-lab/OPERATIONS.md) provides normal-navigation
+and readable HTTP 202 fixtures. The [optional condition recipes](#offline-reference-candidates)
+add browser-header, Tor exit-list, and managed-challenge cases.
 A public deployment needs its own catalog record, operator authorization, and
 current qualification in a new batch-specific readiness manifest. The completed
 #41/#42 authority does not cover future deployments or requests.
@@ -310,10 +311,10 @@ unfilled rather than expanding a study to obtain it.
 
 ## Offline reference candidates
 
-These are versioned construction recipes, not currently qualified public
-endpoints. All three remain `candidate`; no live request or browser outcome is
-established by their synthetic tests. A future deployment needs a complete
-catalog record using the schema above and a new approved manifest.
+These recipes are catalog candidates for a future deployment. The
+[sanitized qualification report](reference-lab/QUALIFICATION.md) records
+what the temporary lab demonstrated and which checks remain open. A future
+deployment needs a complete catalog record and a new approved manifest.
 
 | Condition | Recipe and independent expectation | Still needed before selection |
 |---|---|---|

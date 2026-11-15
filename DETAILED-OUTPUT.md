@@ -14,8 +14,10 @@ Use endpoints appropriate for the collection you have authorized.
 
 ## Choosing a measurement policy
 
-To record each observation while keeping the default failure-driven retries
-and conditional comparison for the target, select the output format alone.
+Select the output format alone to record each request with the default retry
+and comparison policy. The option table calls the verdicts that can trigger
+a retry or comparison *block-like*. They are `FAIL`, `CHALLENGE`, `RATELIMIT`,
+`DROP`, `TIMEOUT`, and `SOCKS`.
 
 ```zsh
 ./check_tor.zsh --format jsonl-v2 /path/outside/repo/targets.txt
