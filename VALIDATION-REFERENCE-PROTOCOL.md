@@ -1,7 +1,7 @@
 # Prospective Tor Access Reference Protocol
 
-`TACP-0.4` defines how a future study would compare what the scanner observes
-with what a person can do in Tor Browser and in an ordinary browser. The
+`TACP-0.4` defines how to compare what the scanner observes with what a
+person can do in Tor Browser and in an ordinary browser. The
 scanner starts at one approved URL. In each browser, a person starts at that
 same URL and tries to complete the approved public task. Keeping the results
 separate lets the reviewer see where the scanner verdict and browser outcomes
@@ -19,14 +19,18 @@ agree or diverge.
 > delay measurement, and comparison by browser outcome category. Live
 > environment and data handling remain future readiness decisions.
 
-The owner approved the method for preparation. A future manifest must satisfy
-the [stewardship policy](ETHICS-AND-DATA-STEWARDSHIP.md) and receive explicit
-authority before any live requests. Endpoint construction and operator contact
-also require separate approval. The
-[reference preparation packet](VALIDATION-REFERENCE-PACKET.md) specifies the
-candidate conditions, traffic limits, and decisions still needed. The
-[completed issue #33 pilot](VALIDATION-PILOT-RESULTS.md) remains governed by
-[`TACP-0.2`](VALIDATION-PROTOCOL.md).
+The first batch used this revision under a separately approved manifest.
+The normal navigation case agreed across the scanner and both browsers.
+Both readable HTTP 202 scanner comparisons were inconclusive because
+Tor verification failed before any target request. The report records the
+batch and its separately authorized repeat. [Reviewed results](https://github.com/josephlhall/check_tor/issues/42#tacp-04-reference-batch-results)
+
+Any new live batch requires a fresh manifest and explicit authority under
+the [stewardship policy](ETHICS-AND-DATA-STEWARDSHIP.md). Endpoint construction
+and operator contact also require separate approval. See the
+[reference preparation packet](VALIDATION-REFERENCE-PACKET.md) for candidate
+conditions, traffic limits, and readiness decisions. The completed
+[pilot](VALIDATION-PILOT-RESULTS.md) used [`TACP-0.2`](VALIDATION-PROTOCOL.md).
 
 ## Question and limits
 

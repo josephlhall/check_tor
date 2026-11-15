@@ -107,8 +107,8 @@ def freeze(source, expected_sha256, batch_end, now):
     if not selected or batch_end >= max(observed.values()) + MAX_LIST_AGE:
         raise ValueError("no sufficiently recent IPv4 observation for the planned batch end")
     stamps = [observed[address] for address in selected]
-    # The file is read when nginx starts. Its metadata gives the operator the
-    # mandatory cutoff; nginx itself does not watch clocks or refresh this list.
+    # nginx reads this include at start or reload and keeps the snapshot in
+    # use until stopped or reconfigured. The operator enforces its cutoff.
     rows = [
         "# REF-TOR-DIFF v1, tordnsel 1.0, frozen IPv4 coverage",
         f"# source: {SOURCE}{source.name}",
