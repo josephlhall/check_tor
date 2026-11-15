@@ -13,6 +13,7 @@ import tempfile
 import unittest
 
 from freeze_exit_snapshot import INCLUDE, UTC_FORMAT, freeze
+from serve_frozen_lab import service_cutoff
 from test_lab import HERE, LOOPBACK, Links, NginxLabTestCase
 
 
@@ -119,6 +120,26 @@ class SnapshotTests(unittest.TestCase):
         second = subprocess.run(command, capture_output=True, timeout=10)
         self.assertEqual(second.returncode, 1)
         self.assertEqual(output.read_bytes(), preserved)
+
+    def test_cutoff_uses_reviewed_deadline_and_fails_closed(self):
+        snapshot = self.directory / INCLUDE
+        data = freeze(self.source, source_digest(SOURCE), BATCH_END, NOW).encode("ascii")
+        snapshot.write_bytes(data)
+        digest = hashlib.sha256(data).hexdigest()
+        self.assertEqual(service_cutoff(snapshot, digest), BATCH_END.timestamp() - 5)
+        command = [
+            sys.executable, str(HERE / "serve_frozen_lab.py"),
+            "--config", str(self.directory / "nginx.conf"),
+            "--runtime", str(self.directory),
+            "--include-sha256",
+        ]
+        # These rejection paths must run before the guard tries to start nginx.
+        for reviewed_digest, error in (("0" * 64, b"does not match"),
+                                       (digest, b"past the service cutoff")):
+            with self.subTest(error=error):
+                result = subprocess.run(command + [reviewed_digest], capture_output=True, timeout=10)
+                self.assertEqual(result.returncode, 1)
+                self.assertIn(error, result.stderr)
 
 
 class ConditionTests(NginxLabTestCase):
