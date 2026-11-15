@@ -28,7 +28,15 @@ class Links(HTMLParser):
             self.destinations.append(dict(attrs).get("href"))
 
 
-class ReferenceLabTests(unittest.TestCase):
+class NginxLabTestCase(unittest.TestCase):
+    routes_file = HERE / "routes.conf"
+    startup_path = "/normal"
+    listen_ipv6 = False
+
+    @classmethod
+    def stage_conditions(cls, prefix):
+        pass
+
     @classmethod
     def setUpClass(cls):
         nginx = shutil.which("nginx")
@@ -39,7 +47,8 @@ class ReferenceLabTests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory(prefix="check-tor-reference-lab-")
         cls.addClassCleanup(temporary.cleanup)
         prefix = Path(temporary.name)
-        shutil.copyfile(HERE / "routes.conf", prefix / "routes.conf")
+        shutil.copyfile(cls.routes_file, prefix / "routes.conf")
+        cls.stage_conditions(prefix)
 
         # Ask the OS for a free port and let nginx bind it. The process and
         # per-run certificate are checked before requests exercise the routes.
@@ -47,14 +56,17 @@ class ReferenceLabTests(unittest.TestCase):
             reserve.bind((LOOPBACK, 0))
             cls.port = reserve.getsockname()[1]
         config = (HERE / "nginx.conf").read_text(encoding="utf-8")
+        listener = f"{LOOPBACK}:{cls.port} ssl;"
+        if cls.listen_ipv6:
+            listener += f"\n        listen [::1]:{cls.port} ssl;"
         (prefix / "nginx.conf").write_text(
-            config.replace("127.0.0.1:18443", f"{LOOPBACK}:{cls.port}"),
+            config.replace("127.0.0.1:18443 ssl;", listener),
             encoding="utf-8",
         )
 
         (prefix / "openssl.cnf").write_text(
             "[req]\ndistinguished_name = dn\nx509_extensions = server\n"
-            "[dn]\n[server]\nsubjectAltName = IP:127.0.0.1\n",
+            "[dn]\n[server]\nsubjectAltName = IP:127.0.0.1,IP:::1\n",
             encoding="ascii",
         )
         cls.run_tool(
@@ -78,7 +90,7 @@ class ReferenceLabTests(unittest.TestCase):
                 _, error = process.communicate(timeout=2)
                 raise RuntimeError(f"nginx exited during startup: {error}")
             try:
-                status, _, _ = cls.request("GET", "/normal")
+                status, _, _ = cls.request("GET", cls.startup_path)
             except ConnectionRefusedError:
                 time.sleep(0.025)
             else:
@@ -104,8 +116,8 @@ class ReferenceLabTests(unittest.TestCase):
             process.communicate(timeout=5)
 
     @classmethod
-    def request(cls, method, path, body=None, headers=None):
-        client = http.client.HTTPSConnection(LOOPBACK, cls.port, context=cls.context, timeout=2)
+    def request(cls, method, path, body=None, headers=None, host=LOOPBACK):
+        client = http.client.HTTPSConnection(host, cls.port, context=cls.context, timeout=2)
         try:
             client.request(method, path, body=body, headers=headers or {})
             response = client.getresponse()
@@ -113,6 +125,26 @@ class ReferenceLabTests(unittest.TestCase):
         finally:
             client.close()
 
+    def probe(self, route):
+        # Use the shared target probe directly so it never contacts the Tor API.
+        bridge = HERE.parent / "check_tor_probe.zsh"
+        request_dir = tempfile.mkdtemp(prefix="probe-", dir=self.prefix)
+        result = subprocess.run(
+            ["zsh", str(bridge), request_dir, "direct",
+             f"https://{LOOPBACK}:{self.port}{route}", "3", "1", "target"],
+            env={
+                "PATH": os.environ.get("PATH", os.defpath),
+                "HOME": str(self.prefix),
+                "CURL_CA_BUNDLE": str(self.certificate),
+                "SSL_CERT_FILE": str(self.certificate),
+            },
+            capture_output=True, text=True, timeout=10,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return json.loads(result.stdout)
+
+
+class ReferenceLabTests(NginxLabTestCase):
     def test_normal_task_has_one_first_party_link(self):
         status, headers, body = self.request("GET", "/normal")
         self.assertEqual(status, 200)
@@ -145,25 +177,9 @@ class ReferenceLabTests(unittest.TestCase):
         self.assertEqual(head_body, b"")
 
     def test_scanner_probe_labels_normal_and_accepted_differently(self):
-        # Use the shared target probe directly so it never contacts the Tor API.
-        bridge = HERE.parent / "check_tor_probe.zsh"
         for route, status, verdict in (("/normal", 200, "PASS"), ("/accepted", 202, "CHALLENGE")):
             with self.subTest(route=route):
-                request_dir = self.prefix / f"probe-{status}"
-                request_dir.mkdir()
-                result = subprocess.run(
-                    ["zsh", str(bridge), str(request_dir), "direct",
-                     f"https://{LOOPBACK}:{self.port}{route}", "3", "1", "target"],
-                    env={
-                        "PATH": os.environ.get("PATH", os.defpath),
-                        "HOME": str(self.prefix),
-                        "CURL_CA_BUNDLE": str(self.certificate),
-                        "SSL_CERT_FILE": str(self.certificate),
-                    },
-                    capture_output=True, text=True, timeout=10,
-                )
-                self.assertEqual(result.returncode, 0, result.stderr)
-                record = json.loads(result.stdout)
+                record = self.probe(route)
                 self.assertIsNone(record["local_error"], record)
                 self.assertEqual(record["curl_exit"], 0, record)
                 self.assertEqual(record["http_status"], status, record)
@@ -186,6 +202,8 @@ class ReferenceLabTests(unittest.TestCase):
         self.assertEqual(self.request("GET", "/routes.conf")[0], 404)
         self.assertEqual(self.request("GET", "/tls.key")[0], 404)
         self.assertEqual(self.request("GET", "/")[0], 404)
+        for route in ("/client", "/client/complete", "/tor-diff", "/tor-diff/complete"):
+            self.assertEqual(self.request("GET", route)[0], 404)
 
 
 if __name__ == "__main__":

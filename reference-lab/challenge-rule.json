@@ -1,0 +1,6 @@
+{
+  "description": "REF-CHALLENGE temporary reading room",
+  "expression": "(lower(http.host) eq \"challenge-lab.example.org\" and http.request.method in {\"GET\" \"HEAD\"} and http.request.uri.path in {\"/reading-room\" \"/reading-room/complete\"})",
+  "action": "managed_challenge",
+  "enabled": false
+}

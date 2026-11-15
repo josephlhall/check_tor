@@ -1,11 +1,15 @@
 # Task-Based Reference Experiment Preparation Packet
 
-The existing normal-navigation candidate can advance to readiness review.
-The readable HTTP 202 fixture is available locally. It needs live deployment,
-operator permission, and qualification. The other three conditions still need
-construction or permission and may be deferred. The owner approved offline
-preparation with a budget of zero remote requests. A later manifest must identify the endpoints and receive
-explicit authority before live preflight or collection.
+The first reference batch is complete; its reviewed findings are published in
+[issue #42](https://github.com/josephlhall/check_tor/issues/42). Both readable
+HTTP 202 scanner-to-browser comparisons remain **inconclusive**, and the
+temporary public 202 page has been retired. The local fixture remains reusable.
+
+This document preserves the approved preparation design and its original
+planning ceiling. It is not an active live manifest. The remaining conditions
+have reusable offline recipes under #44–46; any future batch
+needs new endpoint qualification and explicit authority for its exact traffic.
+See the [offline implementation checkpoint](reference-lab/IMPLEMENTATION-CHECKPOINT.md).
 
 > **Issue:** [#39](https://github.com/josephlhall/check_tor/issues/39)
 >
@@ -31,7 +35,7 @@ a 1 MiB target-body cap on both routes, and one Tor verification request per
 invocation. Freeze the scanner commit, exact command, and effective cap in
 the readiness manifest. Changes to the cap, startup retry policy, or output
 schema require prospective protocol and manifest approval.
-[Readiness issue #41](https://github.com/josephlhall/check_tor/issues/41)
+[Completed first-batch readiness #41](https://github.com/josephlhall/check_tor/issues/41)
 
 ## Reference-condition specifications
 
@@ -46,10 +50,10 @@ unavailable.
 | Condition | Status |
 |---|---|
 | [`REF-NORMAL`](#ref-normal-ordinary-content-with-working-navigation) | Candidate for later preflight, subject to current verification and new approval |
-| [`REF-202`](#ref-202-intelligible-http-202-status) | Local fixture available. Live deployment, qualification, and operator authorization pending. |
-| [`REF-CHALLENGE`](#ref-challenge-managed-challenge) | Requires construction and operator permission |
-| [`REF-CLIENT`](#ref-client-client-dependent-refusal) | Requires construction, permission, and a stable rule that distinguishes the clients |
-| [`REF-TOR-DIFF`](#ref-tor-diff-tor-versus-direct-requests) | Requires construction, permission, and a reviewable Tor classification rule |
+| [`REF-202`](#ref-202-intelligible-http-202-status) | Local fixture reusable; first-batch public endpoint retired. Any new deployment needs fresh qualification and authority. |
+| [`REF-CHALLENGE`](#ref-challenge-managed-challenge) | [Offline rule/task recipe](reference-lab/CHALLENGE.md); actual provider/plan, deployment and qualification remain pending. |
+| [`REF-CLIENT`](#ref-client-client-dependent-refusal) | [Offline candidate rule](reference-lab/CONDITIONS.md); exact browser compatibility and live authority remain pending. |
+| [`REF-TOR-DIFF`](#ref-tor-diff-tor-versus-direct-requests) | [Offline candidate rule](reference-lab/CONDITIONS.md); current source/coverage review, deployment and qualification remain pending. |
 
 ### `REF-NORMAL` Ordinary content with working navigation
 
@@ -91,8 +95,8 @@ scanner may classify a response as challenge-like, but JSONL v1 does not show
 the live challenge header or the browser outcome. Cloudflare documents a
 challenge-response header. The approved packet does not collect that header.
 Deterministic Turnstile test keys would exercise their own flow, so evidence
-for a managed challenge requires a managed challenge rule. Construction and
-operator permission are pending.
+for a managed challenge requires a managed challenge rule. The [offline recipe](reference-lab/CHALLENGE.md) prepares the rule and task;
+actual provider review, deployment, operator permission, and qualification remain pending.
 [Cloudflare challenge-response documentation](https://developers.cloudflare.com/cloudflare-challenges/challenge-types/challenge-pages/detect-response/) · [Turnstile test documentation](https://developers.cloudflare.com/turnstile/troubleshooting/testing/)
 
 ### `REF-CLIENT` Client-dependent refusal
@@ -131,10 +135,13 @@ publication sensitivity, evidence for the expected instrument behavior,
 stability, whether previous requests or session state can affect later results,
 interaction limit, verification method and date, owner and contact, and what
 would retire the entry. The condition IDs are planning labels.
-`HTTPBIN-LINKS-2` is the only existing catalog entry proposed for these
-conditions. Its documented purpose was verified for the dry run. Recheck
-that evidence and obtain approval for the specific batch through
-[issue #41](https://github.com/josephlhall/check_tor/issues/41).
+The original proposal used `HTTPBIN-LINKS-2` as its existing normal-navigation
+entry. Its documented purpose was verified for the dry run. The newer
+[offline candidates](REFERENCE-ENDPOINTS.md#offline-reference-candidates)
+provide construction recipes but no qualified public endpoints. Recheck
+that evidence and obtain approval through a new batch-specific readiness
+manifest. [Issue #41](https://github.com/josephlhall/check_tor/issues/41) records
+the completed first batch and supplies no authority for new traffic.
 
 ## Approved planning shape and traffic accounting
 
