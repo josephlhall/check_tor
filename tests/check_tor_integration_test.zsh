@@ -171,9 +171,13 @@ PATH="$FAKE_BIN:/usr/bin:/bin" \
            $+functions[print_json_summary] && $+functions[probe] && $+functions[tor_preflight] &&
            $+functions[scan_target] && $+functions[print_summary] &&
            $+functions[run_scan] && $+functions[main] )) || exit 11
-        parse_args --format jsonl "$CHECK_TOR_SOURCE_INPUT" || exit 12
+        parse_args --format jsonl --timeout-preflight=24 "$CHECK_TOR_SOURCE_INPUT" || exit 12
         parsed_input=$REPLY
         parsed_settings="${(j:,:)reply[2,-1]}"
+        [[ $reply_timeout_preflight == 24 ]] || exit 15
+        parse_args --timeout-preflight=0 "$parsed_input" 2>/dev/null && exit 16
+        [[ -z $reply_timeout_preflight ]] || exit 17
+        parse_args "$parsed_input" && [[ $reply_timeout_preflight == 20 ]] || exit 18
         json_quote $'"'"'quote" slash\\ tab\t line\n'"'"'
         quoted_value=$REPLY
         load_targets "$parsed_input" || exit 13
@@ -210,6 +214,9 @@ PATH="$FAKE_BIN:/usr/bin:/bin" \
     "$zsh_executable" -c '
         source "$1"
         trap '\''print -r -- preserved > "$CHECK_TOR_SOURCE_TRAP"'\'' EXIT
+        reply_timeout_preflight=caller-value
+        main --timeout-preflight 00001 "$2" || exit 20
+        [[ $PREFLIGHT_TIMEOUT == 20 && $reply_timeout_preflight == caller-value ]] || exit 21
         main "$2"
     ' zsh "$REPO_ROOT/check_tor.zsh" "$sourced_main_case/targets.txt" \
     > "$sourced_main_case/stdout" 2> "$sourced_main_case/stderr"
@@ -217,6 +224,8 @@ sourced_main_status=$?
 set -e
 assert_eq "sourced main status" 0 "$sourced_main_status"
 assert_eq "sourced main stderr" "" "$(< "$sourced_main_case/stderr")"
+assert_eq "sourced main uses the override only for the first invocation" \
+    $'1\n180\n20\n180' "$(curl_timeouts "$sourced_main_case/curl.log")"
 assert_eq "sourced main preserves caller trap" "preserved" "$(< "$sourced_main_case/caller-trap")"
 assert_eq "sourced main temporary cleanup" 0 "$(find "$sourced_main_case/scanner-tmp" -type f | wc -l | tr -d ' ')"
 
@@ -271,6 +280,7 @@ assert_contains "help usage" "Usage:" "$(< "$cli_case/help.out")"
 assert_contains "help documents NO_COLOR" "NO_COLOR" "$(< "$cli_case/help.out")"
 assert_contains "help documents JSONL format" "--format text|jsonl" "$(< "$cli_case/help.out")"
 assert_contains "help documents proxy setting" "--proxy HOST:PORT" "$(< "$cli_case/help.out")"
+assert_contains "help documents preflight timeout" "--timeout-preflight SECONDS" "$(< "$cli_case/help.out")"
 assert_contains "help documents no-clearnet setting" "--no-clearnet" "$(< "$cli_case/help.out")"
 assert_eq "help stderr" "" "$(< "$cli_case/help.err")"
 assert_eq "missing argument status" 1 "$missing_status"
@@ -305,12 +315,19 @@ for invalid_setting in \
     '--max-body-bytes=99999999999999999999MiB' \
     '--timeout-first=0' \
     '--timeout-retry=3601' \
-    '--timeout-clearnet=slow'
+    '--timeout-clearnet=slow' \
+    '--timeout-preflight' \
+    '--timeout-preflight=' \
+    '--timeout-preflight=0' \
+    '--timeout-preflight=-1' \
+    '--timeout-preflight=1.5' \
+    '--timeout-preflight=3601' \
+    '--timeout-preflight=99999999999999999999'
 do
     setting_name=${invalid_setting%%=*}
     setting_value=${invalid_setting#*=}
     setting_args=("$invalid_setting")
-    [[ $invalid_setting == --max-body-bytes ]] || setting_args+=("$TEST_TMP/absent.txt")
+    [[ $invalid_setting == *=* ]] && setting_args+=("$TEST_TMP/absent.txt")
     set +e
     CHECK_TOR_FAKE_LOG="$cli_case/curl.log" PATH="$FAKE_BIN:/usr/bin:/bin" \
         "$REPO_ROOT/check_tor.zsh" "${setting_args[@]}" \
@@ -451,7 +468,7 @@ mkdir "$configured_case"
 print -r -- "configured.example.test" > "$configured_case/targets.txt"
 run_scanner persistent_tor_block "$configured_case/targets.txt" "$configured_case" jsonl \
     --proxy proxy.example.test:19050 --circuits 2 --timeout-first=11 \
-    --timeout-retry 12 --timeout-clearnet=13
+    --timeout-retry 12 --timeout-clearnet=13 --timeout-preflight=3600
 assert_eq "configured scan status" 0 "$scanner_status"
 assert_contains "configured attempt limit" '"tor_attempt_limit":2' "$scanner_stdout"
 assert_contains "configured control remains enabled" \
@@ -460,7 +477,7 @@ assert_eq "configured probe count" 3 "$(< "$configured_case/curl.state")"
 assert_eq "configured proxy reaches preflight and Tor probes" 3 \
     "$(grep -c -- '--socks5-hostname proxy.example.test:19050' "$configured_case/curl.log")"
 assert_eq "configured timeouts for preflight, first Tor attempt, retry, and control" \
-    $'20\n11\n12\n13' "$(curl_timeouts "$configured_case/curl.log")"
+    $'3600\n11\n12\n13' "$(curl_timeouts "$configured_case/curl.log")"
 
 # Disabling clearnet leaves a persistent automated-Tor block observable, but
 # deliberately withholds the Tor-specific inference that needs a control.
@@ -549,11 +566,12 @@ assert_contains "JSONL preflight diagnostic stderr" "Tor connection failed" "$sc
 assert_not_contains "non-Tor result does not report a timeout" "timed out" "$scanner_stderr"
 
 # A partial affirmative reply with curl exit 28 must never admit targets.
-run_scanner preflight_timeout "$json_preflight_case/targets.txt" "$json_preflight_case" jsonl
+run_scanner preflight_timeout "$json_preflight_case/targets.txt" "$json_preflight_case" jsonl \
+    --timeout-preflight 31
 assert_eq "JSONL preflight timeout status" 1 "$scanner_status"
 assert_eq "JSONL preflight timeout stdout" "" "$scanner_stdout"
-assert_contains "JSONL preflight timeout stderr" "Tor startup check timed out after 20 seconds." "$scanner_stderr"
-assert_eq "preflight timeout never probes targets" 20 "$(curl_timeouts "$json_preflight_case/curl.log")"
+assert_contains "JSONL preflight timeout stderr" "Tor startup check timed out after 31 seconds." "$scanner_stderr"
+assert_eq "preflight timeout never probes targets" 31 "$(curl_timeouts "$json_preflight_case/curl.log")"
 
 if (( failures > 0 )); then
     print -u2 -- "$failures of $tests checks failed"

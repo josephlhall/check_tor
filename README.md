@@ -138,6 +138,7 @@ scan. The following options apply to ordinary scans and detailed measurements.
 | `--circuits N` | `3` | Maximum Tor attempts for failure-driven retries, from 1 to 100. |
 | `--max-redirects N` | `10` | Redirects curl may follow per Tor or comparison probe, from 0 to 100. |
 | `--max-body-bytes SIZE` | `1MiB` | Maximum bytes retained from each target response on either route, from 1 byte through 10 MiB. |
+| `--timeout-preflight N` | `20` | Each Tor verification request’s timeout in seconds, from 1 to 3600. |
 | `--timeout-first N` | `180` | First Tor attempt's timeout in seconds, from 1 to 3600. |
 | `--timeout-retry N` | `180` | Later Tor attempts' timeout in seconds, from 1 to 3600. |
 | `--timeout-clearnet N` | `20` | Comparison request's timeout in seconds, from 1 to 3600. |
@@ -147,8 +148,10 @@ scan. The following options apply to ordinary scans and detailed measurements.
 
 The 180-second Tor target timeouts give slow requests more time to finish and
 can increase scan duration. Record the effective timeouts when comparing
-runs. The startup check for Tor (the preflight) has a separate, fixed
-20-second timeout. The scanner reports a preflight timeout on stderr.
+runs. The startup check for Tor (the preflight) has a separate timeout, set
+with `--timeout-preflight N` in any output mode. It defaults to 20 seconds.
+The scanner reports a terminal preflight timeout on stderr. This setting affects each
+verification request and is independent of the target request timeouts.
 
 The redirect budget excludes the initial request. With `--max-redirects 1`,
 curl can reach the first redirect destination. If that destination sends
@@ -255,9 +258,12 @@ options, routing guarantees, record fields, and how to interpret partial runs.
 Detailed mode normally verifies Tor once before starting targets. Opt in to
 `--format jsonl-v2 --preflight-retry transient` to allow up to three
 verification requests. Eligible transport failures wait 15 seconds before the
-second attempt and 30 seconds before the third; each request retains its
-20-second timeout and fixed 1 MiB body cap. Global `--start-gap` pacing also
-applies. Targets start only after completed, valid Tor verification.
+second attempt and 30 seconds before the third. Each uses the selected
+`--timeout-preflight` and a fixed 1 MiB body cap. With timeout `T`, one
+attempt permits up to `T` seconds of transport wait. Three attempts permit
+up to `3 × T + 45` seconds including backoff, plus any extra global
+`--start-gap` pacing and local process overhead. Targets start only after
+completed, valid Tor verification.
 
 Retries apply to specified transport errors when curl reports no HTTP
 response. See [Tor verification and retries](DETAILED-OUTPUT.md#tor-verification-and-retries)
@@ -283,6 +289,11 @@ copies may also persist in clones, forks, or archives.
 
 ## Measurement validation
 
+Start with the [offline experiment guide](EXPERIMENTS.md) to compare controlled
+HTTP responses and TLS failures with scanner observations. It includes a
+reusable local runner, saved-run inspection, and a capture recipe for future
+authorized measurements.
+
 The completed TACP-0.2 pilot compared scanner results with practical access in
 Tor Browser. Of 26 cases, 20 strongly agreed, one scanner result was more
 optimistic than the browser outcome, and five comparisons were inconclusive.
@@ -297,10 +308,10 @@ later, separate set of checks on controlled examples.
 
 ### Background on the Tor timeouts
 
-Preliminary Field Station Gold 1 measurements compared Tor and direct access
-across 785 civil-society and technology organization hostnames. The beta
-configuration appears to have produced more successful observations. It
-raised the route budget from 60 to 180 seconds, the redirect limit from one
+A preliminary comparison of automated Tor and direct retrieval covered
+785 civil-society and technology organization hostnames. A later configuration
+appeared to produce more successful observations. It raised the route budget
+from 60 to 180 seconds, the redirect limit from one
 to ten, and the response-body limit from 1 MiB to 10 MiB. The comparison
 cannot isolate the effect of the timeout.
 
@@ -327,6 +338,7 @@ needed.
   python3 -m unittest discover -s tests -p 'test_redirects.py'
   python3 -m unittest discover -s tests -p 'test_retry_after.py'
   python3 -m unittest discover -s tests -p 'test_tls.py'
+  python3 -m unittest discover -s tests -p 'test_inspect.py'
   git diff --check
 )
 ```
@@ -347,7 +359,11 @@ connection. Live Tor and browser comparisons use a separate study protocol.
 The [Offline tests workflow](.github/workflows/offline-tests.yml) runs those
 suites on Ubuntu and macOS for pull requests and pushes to `main`, and can run
 on demand. On macOS, it also runs the Python suites with Apple’s system
-Python. The tests make no requests to public control hosts.
+Python. A separate Ubuntu job installs nginx and exercises the optional lab
+and experiment runner. The tests make no requests to public control hosts.
+
+For interactive experiments and retained observations, follow the
+[experiment guide](EXPERIMENTS.md).
 
 The optional [local HTTPS reference lab](reference-lab/OPERATIONS.md) has its
 own loopback tests. nginx is a lab dependency. Routine scanner checks use the

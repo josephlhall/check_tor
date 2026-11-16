@@ -14,6 +14,11 @@ if (( ${+CHECK_TOR_MAX_BODY_BYTES} )); then
     parse_bounded_integer "$CHECK_TOR_MAX_BODY_BYTES" --max-body-bytes "$MAX_SUPPORTED_BODY_BYTES" || exit 70
     MAX_BODY_BYTES=$REPLY
 fi
+# Resolve the bound before the settings query so the profile and curl agree.
+if (( ${+CHECK_TOR_PREFLIGHT_TIMEOUT} )); then
+    parse_bounded_integer "$CHECK_TOR_PREFLIGHT_TIMEOUT" --timeout-preflight 3600 || exit 70
+    PREFLIGHT_TIMEOUT=$REPLY
+fi
 if [[ ${1:-} == --settings && $# == 1 ]]; then
     json_quote "$USER_AGENT"; ua=$REPLY
     json_quote "$ACCEPT_HDR"; accept=$REPLY

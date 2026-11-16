@@ -55,6 +55,7 @@ jobs:
           python3 -m unittest discover -s tests -p 'test_transport_review.py'
           python3 -m unittest discover -s tests -p 'test_redirects.py'
           python3 -m unittest discover -s tests -p 'test_retry_after.py'
+          python3 -m unittest discover -s tests -p 'test_inspect.py'
 
       - name: Run local TLS tests
         run: python3 -m unittest discover -s tests -p 'test_tls.py'
@@ -64,3 +65,19 @@ jobs:
         run: |
           /usr/bin/python3 --version
           /usr/bin/python3 -m unittest discover -s tests -p '*test*.py'
+
+  reference-lab:
+    name: Reference lab
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install local lab tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes zsh openssl nginx
+      - name: Run local lab and experiment checks
+        run: python3 -m unittest discover -s reference-lab -p 'test_*.py' -v

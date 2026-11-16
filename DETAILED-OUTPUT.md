@@ -55,6 +55,7 @@ preserving the configured TLS trust settings.
 | `--max-partner-gap S` | Mark a pair late if the start times of its two probes are more than S seconds apart. Accepts positive seconds up to 3600, default 60. Requires trial-scoped controls when set explicitly. |
 | `--execution-policy legacy\|paired-cautious` | Default `legacy`. `paired-cautious` prioritizes ready pair partners and stops an input hostname after explicit HTTP 429. |
 | `--rate-limit-stop immediate\|after-pair` | Requires `paired-cautious`. Default `immediate`. `after-pair` also requires fixed trials, `--control always`, and `--control-scope trial`. |
+| `--timeout-preflight N` | Each Tor verification request’s timeout, 1–3600 seconds, default 20. Available in every output mode. |
 | `--preflight-retry none\|transient` | Default `none`: one Tor verification attempt. `transient` permits three attempts with 15s/30s waits for eligible transport failures. |
 | `--workers N` | At most N active target bundles, from 1 to 32; default 1. |
 | `--start-gap S` | Global minimum interval between coordinator probe invocations, in seconds, from 0 to 3600; default 0. |
@@ -116,11 +117,16 @@ without retries. There are no HTTP-status retries.
 
 After a retryable failure, the coordinator waits 15 seconds after the first
 completion and 30 seconds after the second. At most three requests are issued.
-Each request has a 20-second timeout and retains the fixed 1 MiB body cap, SOCKS
-endpoint, certificate validation, and no-redirect behavior. Global pacing
+Each request uses `--timeout-preflight N` (default 20 seconds) and retains
+the fixed 1 MiB body cap, SOCKS endpoint, certificate validation, and
+no-redirect behavior. Global pacing
 also applies: the next launch must satisfy both the completion-based backoff
 and the previous-launch-based `--start-gap`. Waiting is interruptible;
-cancellation prevents subsequent preflight and target launches.
+cancellation prevents subsequent preflight and target launches. With timeout
+`T`, the single-attempt transport allowance is `T`; three attempts plus their
+backoff allow up to `3 × T + 45` seconds. Additional pacing and local process
+overhead can extend wall-clock startup time. Setting a historical timeout
+alone does not establish comparability with an older scanner revision.
 
 Targets require successful curl completion and a valid JSON object with a
 boolean `IsTor: true`. Duplicate keys, trailing garbage, and matching strings
@@ -135,6 +141,10 @@ preflight must deliberately support multiple attempts before selecting
 `transient`. Every issued preflight has its own `attempt_start`/`attempt_end`,
 unique `attempt_id`, timestamps, timeout, and transport facts. Preflights have
 null target/trial/pair identities and never enter target verdict totals.
+`settings.timeout_preflight` records the selected per-attempt timeout.
+`settings.request_profile.preflight_timeout` records the bridge’s effective
+value, which also supplies each preflight’s `requested_timeout`. Older v2
+records can omit the new top-level setting.
 `settings.preflight_retry` records `none` or `transient`;
 `settings.preflight_retry_delays` is `[]` or `[15, 30]`, and
 `settings.preflight_retry_curl_exits` records the finite eligibility allowlist.
@@ -581,3 +591,9 @@ diagnostics. The record format excludes raw bodies, cookies, headers,
 environment dumps, exit IPs, and circuit identities. It can still expose
 target URLs, query strings, caller labels, and result details. Keep
 credentials out of targets and labels and store the records privately.
+
+## Inspecting saved records
+
+The [experiment guide](EXPERIMENTS.md#inspect-a-saved-scanner-run) describes
+the offline inspector and its validation limits, with a capture recipe that
+preserves the process exit status alongside the records.
