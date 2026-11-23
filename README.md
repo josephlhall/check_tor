@@ -20,6 +20,7 @@ not affiliated with or endorsed by [The Tor Project](https://www.torproject.org/
 ### Install and start Tor
 
 Open a terminal in a checkout or an extracted [tagged release](https://github.com/josephlhall/check_tor/releases).
+You can run `./check_tor.zsh` from your usual shell.
 The scanner needs Zsh and curl on `PATH`, plus the standard utilities `awk`,
 `grep`, `head`, `cut`, `tr`, `wc`, and `mktemp`.
 
